@@ -18,70 +18,83 @@ Environment: Emacs 30, modern =display-buffer= behavior,
 installed.
 
 Each entry ends with a link to the corresponding commit in
-=dmgerman/bookmark-x=, where the downstream fix is implemented.
-Those commits are the reference implementation; the companion
-file adapts them into patches against =bookmark-plus= file
-paths.
+=dmgerman/bookmark-x=, where the downstream reference
+implementation lives. Those commits are the *reference*, not
+the patch — the companion file adapts them into diffs against
+=bookmark-plus= file paths and function names.
 
 ** Summary
 
-| # | Function / area                         | File               | Nature of the problem              |
-|---+-----------------------------------------+--------------------+------------------------------------|
-| 1 | =bmkp--jump-via=                          | =bookmark+-1.el=     | Custom-handler jumps display nothing |
-| 2 | =bmkp-list-switch-other-window=           | =bookmark+-bmu.el= | =C-o= in =*Bmkp List*= full-jumps    |
-| 3 | =bmkp-jump-dired=                         | =bookmark+-1.el=     | Ignores =display-buffer=             |
-| 4 | =bmkp-bmenu-edit-annotation=              | =bookmark+-bmu.el= | =a e= prompts instead of acting on point |
-| 5 | =bmkp-write-bookmark-file=                | =bookmark+-1.el=     | Save triggers autoreload prompt    |
-| 6 | =bmkp--jump-via= + write path (consult)   | =bookmark+-1.el=     | Consult-selected candidate loads but does not display |
+| # | Function / area                        | File             | Nature of the problem                        | Status                    |
+|---+----------------------------------------+------------------+----------------------------------------------+---------------------------|
+| 1 | =bookmark--jump-via=                     | =bookmark+-1.el=   | Custom-handler jumps display nothing         | applies                   |
+| 2 | =bookmark-bmenu-switch-other-window=     | =bookmark+-bmu.el= | =C-o= in =*Bookmark List*= full-jumps        | applies                   |
+| 3 | =bmkp-jump-dired=                        | =bookmark+-1.el=   | Ignores =display-buffer=                     | applies (needs #2)        |
+| 5 | =bookmark-write-file=                    | =bookmark+-1.el=   | Missing timestamp cache update               | does not manifest         |
+| 6 | consult-driven jump display              | =bookmark+-1.el=   | Selected candidate loads but does not display | conditional (see body)    |
 
-Bugs 1 and 6 are related — the display half of Bug 6 is fixed by
-Bug 1. Bug 6's second half (temporary-bookmark filter on write)
-is independent.
+Bug 4 was investigated and removed. It was a bookmark-x-only
+issue introduced by the fork's sibling refactor;
+=bookmark-plus= uses vanilla =bookmark-bmenu-edit-annotation=,
+which already acts on the bookmark at point.
 
-Bugs 2 and 3 are related — Bug 2's overriding-action installation
-is the caller that Bug 3's handler mishandled. Both fixes are
-needed; either alone still shows the symptom in some scenarios.
+Bugs 1 and 6 are related — the display half of Bug 6 is closed
+by Bug 1's fix. Bug 6's temp-filter half is already implemented
+in =bookmark-plus= (=bookmark-write-file= skips
+=(bmkp-temporary-bookmark-p bmk)= records).
 
-Bugs 4 and 5 are standalone.
+Bugs 2 and 3 are related — Bug 2's overriding-action
+installation is the caller that Bug 3's handler mishandled.
+Both fixes are needed; either alone still shows the symptom in
+some scenarios.
 
-* Bug 1 — =bmkp--jump-via= does not display for custom-handler jumps
+Bug 5 is a real gap between =bookmark-plus='s redefined
+=bookmark-write-file= and vanilla behavior, but the described
+symptom does not appear in a pure =bookmark-plus= session
+because =bookmark-plus= also redefines =bookmark-maybe-load-
+default-file= to use a boolean =bmkp-bookmarks-already-loaded=
+instead of consulting =bookmark-bookmarks-timestamp=. See the
+body for the reasoning.
+
+* Bug 1 — =bookmark--jump-via= does not display for custom-handler jumps
 
 ** Symptom
 
 Jumping to a bookmark whose record has a custom handler (PDF,
 EWW, Gnus, Info, Man, image, org, or any third-party handler)
-"works" — the destination buffer is created and its handler runs
-— but no window changes. The user stays in the previously
+"works" — the destination buffer is created and its handler
+runs — but no window changes. The user stays in the previously
 selected buffer, unaware anything happened.
 
 Related: when the caller sets =display-buffer-overriding-action=
-(e.g. =bmkp-list-switch-other-window=, previewing from =*Bmkp
-List*=), some handler families additionally clobber the
-originating window in place, so the "preview" replaces the
+(e.g. =bookmark-bmenu-switch-other-window=, previewing from
+=*Bookmark List*=), some handler families additionally clobber
+the originating window in place, so the "preview" replaces the
 caller's buffer instead of opening in another window.
 
 ** Reproducer
 
 1. Bookmark a PDF via =pdf-tools= (handler
    =pdf-view-bookmark-jump-handler=).
-2. From any buffer, =M-x bmkp-jump= that bookmark.
+2. From any buffer, =M-x bookmark-jump= that bookmark.
 3. Expected: PDF displayed in a window. Observed: nothing
    visible changes; the PDF buffer is alive but never shown.
 
-For the preview variant, do the above from =*Bmkp List*= via
-=C-o= and observe the =*Bmkp List*= window get replaced by the
-handler's destination.
+For the preview variant, do the above from =*Bookmark List*=
+via =C-o= and observe the =*Bookmark List*= window get replaced
+by the handler's destination.
 
 ** Root cause
 
-Built-in =bookmark--jump-via= (in =bookmark.el=) always calls
-=DISPLAY-FUNCTION= on the destination after the handler returns.
-=bookmark-plus='s =bmkp--jump-via= departs from that contract:
-it relies on the handler to consult the global
-=bmkp-jump-display-function= itself. Only the default handler
-(via =bmkp-goto-position=) does so. Every custom handler follows
-the built-in contract ("=set-buffer= to the destination and
-leave display to the caller"), so nothing displays.
+=bookmark-plus= redefines vanilla =bookmark--jump-via= (in
+=bookmark+-1.el= at ~line 2916) so that it does *not* call
+=DISPLAY-FUNCTION= on the destination after the handler
+returns. The intent is to let the handler itself consult the
+global =bmkp-jump-display-function= and decide what to do. Only
+the default handler path (via =bmkp-goto-position=) actually
+does so. Every custom handler follows the vanilla contract
+("=set-buffer= to the destination and leave display to the
+caller"), so nothing displays.
 
 Handlers fall into three families that need distinguishing:
 
@@ -102,35 +115,35 @@ An unconditional =funcall= of =DISPLAY-FUNCTION= after the
 handler is correct only for Case C; Case A leaves the
 originating window wrongly clobbered and then displays
 elsewhere, and Case B produces a double display that steals a
-second window (frequently =*Bmkp List*= in the preview scenario)
-for the destination buffer.
+second window (frequently =*Bookmark List*= in the preview
+scenario) for the destination buffer.
 
 ** Two approaches to the fix
 
 There are two ways to close the observed gap. Drew has a stated
 design preference for the first; the downstream fork's original
 patch implements the second. Both close the symptom; they
-differ in how much of =bmkp--jump-via='s current contract is
-preserved.
+differ in how much of =bookmark--jump-via='s current contract
+is preserved.
 
 *** Approach A — per-handler fixes (Drew's preferred design)
 
-Drew's position is that =bmkp--jump-via= should *not* be changed
-to unconditionally call =DISPLAY-FUNCTION= after the handler.
-The current behavior is deliberate: it lets a handler choose to
-(1) not display at all, (2) invoke =bmkp-jump-display-function=
-itself at the point of its choosing, or (3) display in a way
-that ignores the caller's requested action. A vanilla-style
-=funcall= at the end of =bmkp--jump-via= removes that
-flexibility.
+Drew's position is that =bookmark--jump-via= should *not* be
+changed to unconditionally call =DISPLAY-FUNCTION= after the
+handler. The current behavior is deliberate: it lets a handler
+choose to (1) not display at all, (2) invoke
+=bmkp-jump-display-function= itself at the point of its
+choosing, or (3) display in a way that ignores the caller's
+requested action. A vanilla-style =funcall= at the end of
+=bookmark--jump-via= removes that flexibility.
 
 Under this approach, each handler that currently does only
 =set-buffer= — and therefore silently fails to display under
 =bookmark-plus= — is patched individually. At the end of the
 handler body, the handler calls =bmkp-jump-display-function= on
 the current buffer when that variable is bound and non-nil, and
-raises the frame. This is the same small pattern already used by
-Drew's fix for =xwidget-webkit-bookmark-jump-handler=.
+raises the frame. This is the same small pattern already used
+by Drew's fix for =xwidget-webkit-bookmark-jump-handler=.
 
 Known handlers that need this treatment (non-exhaustive):
 
@@ -148,37 +161,66 @@ display. Coverage grows one handler at a time, however, and
 =bookmark-plus= cannot rescue handlers whose upstream is
 unwilling to patch.
 
-*** Approach B — dispatch in =bmkp--jump-via=
+*** Approach B — dispatch in =bookmark--jump-via=
 
-Extend =bmkp--jump-via= to detect at run time which of the three
-handler families actually ran (see Root cause) and dispatch the
-display accordingly. The idea is to snapshot the originating
-window's buffer before the handler runs, then choose after: if
-the handler clobbered the origin, restore it and call the
-display function; if the destination is already showing
-somewhere, trust the handler; otherwise, call the display
-function ourselves.
+Extend =bookmark--jump-via= to detect at run time which of the
+three handler families actually ran (see Root cause) and
+dispatch the display accordingly. The idea is to snapshot the
+originating window's buffer before the handler runs, then
+choose after: if the handler clobbered the origin, restore it
+and call the display function; if the destination is already
+showing somewhere, trust the handler; otherwise, call the
+display function ourselves.
 
 This covers every handler at once, including third-party ones
-=bookmark-plus= cannot patch. The cost is that =bmkp--jump-via='s
-contract moves closer to vanilla =bookmark--jump-via=, which
+=bookmark-plus= cannot patch. The cost is that
+=bookmark--jump-via='s contract moves closer to vanilla, which
 conflicts with the minority of handlers that intentionally rely
 on the current =bookmark-plus= behavior of not displaying, or
 of displaying non-standardly.
 
+*** Approach C — dispatch + warn (recommended)
+
+Approaches A and B pull in opposite directions: A preserves
+Drew's design (handlers own display) but leaves users hitting
+the bug until every handler is patched upstream; B closes the
+symptom for everyone but hides the fact that many handlers are
+misbehaving.
+
+Approach C combines them. Use Approach B's three-case dispatch
+as a *safety net* so users never see the display bug. But in
+the cases where the dispatch has to intervene — Case A (handler
+clobbered the window, ignoring the caller's overriding action)
+and Case C (handler followed the vanilla contract, leaving
+display to the caller) — emit a =display-warning= naming the
+handler and telling its maintainer exactly what to change.
+Case B stays silent (that handler is a good citizen).
+
+Effect: users get correct behavior today, and =bookmark-plus=
+advocates for Drew's design at runtime — each affected handler
+gets a specific, actionable message that its maintainer will
+see in =*Warnings*=. Once handlers are fixed upstream, the
+dispatch quietly falls through to Case B for them and the
+warnings stop.
+
+A =defcustom= (=bmkp-warn-on-handler-display-fix=, default =t=)
+gates the warnings so power users can silence them if a
+downstream handler is known-unfixable, while keeping the safety
+net enabled.
+
 *** Recommendation
 
-Land Approach A for the handlers we can reach (=pdf-tools=,
-=xwidget-webkit-bookmark-jump-handler=, and any =bookmark-plus=
-handler that only =set-buffer='s). Keep Approach B in reserve
-for handlers that cannot be patched upstream, and gate it behind
-a =defcustom= so users who prefer the strict =bookmark-plus=
-design can leave =bmkp--jump-via= unchanged.
+Land Approach C. It gives users the safety net of Approach B
+while advocating for Drew's design (Approach A) through the
+warnings. Handler maintainers get a specific, actionable
+message; users who don't care about that can flip
+=bmkp-warn-on-handler-display-fix= to =nil= and keep the
+safety net.
 
-The smallest change common to both approaches — replacing =setq=
-with =let= for =bmkp-jump-display-function= inside
-=bmkp--jump-via= — is orthogonal and worth landing on its own;
-it keeps the dynamic binding scoped to the jump.
+The smallest change common to all three approaches — replacing
+=setq= with =let= for =bmkp-jump-display-function= inside
+=bookmark--jump-via= — is orthogonal and worth landing on its
+own; it keeps the dynamic binding scoped to the jump.
 
 ** Related: eager tooltip evaluation on auto-light
 
@@ -190,8 +232,8 @@ file matching =image-file-name-regexp=. With =pdf-tools=
 installed and =pdf= in =image-file-name-extensions=, every
 auto-light on a PDF bookmark spawns an ImageMagick PDF
 conversion, which fails under default =policy.xml=
-(CVE-2018-16509), leaking "Thumb could not be created ... exited
-abnormally with code 1" errors.
+(CVE-2018-16509), leaking "Thumb could not be created ...
+exited abnormally with code 1" errors.
 
 Fix: pass a function to =help-echo= (Emacs accepts a function
 there and calls it on demand when the user hovers), so the
@@ -205,29 +247,30 @@ Downstream commits in =dmgerman/bookmark-x=:
 Regression test:
 [[https://github.com/dmgerman/bookmark-x/commit/27c7b5e][=27c7b5e=]].
 
-* Bug 2 — =bmkp-list-switch-other-window= silently full-jumps
+* Bug 2 — =bookmark-bmenu-switch-other-window= silently full-jumps
 
 ** Symptom
 
-=C-o= in =*Bmkp List*=, documented as previewing the bookmark
-"while the current window remains selected", instead replaces
-the =*Bmkp List*= window's buffer with the destination — a full
-jump.
+=C-o= in =*Bookmark List*=, documented as previewing the
+bookmark "while the current window remains selected", instead
+replaces the =*Bookmark List*= window's buffer with the
+destination — a full jump.
 
 ** Reproducer
 
-1. =M-x bmkp-bmenu-list=.
+1. =M-x bookmark-bmenu-list=.
 2. Move point to any bookmark.
-3. =C-o= (=bmkp-list-switch-other-window=).
-4. Expected: destination shown in another window, =*Bmkp List*=
-   still selected. Observed: =*Bmkp List*= replaced by
-   destination in place.
+3. =C-o= (=bookmark-bmenu-switch-other-window=).
+4. Expected: destination shown in another window, =*Bookmark
+   List*= still selected. Observed: =*Bookmark List*= replaced
+   by destination in place.
 
 ** Root cause
 
-The function let-binds =pop-up-windows=,
+=bookmark-plus= redefines =bookmark-bmenu-switch-other-window=
+in =bookmark+-bmu.el= and let-binds =pop-up-windows=,
 =same-window-buffer-names=, and =same-window-regexps= (obsolete
-under modern =display-buffer=, Emacs 24+) and calls plain
+under modern =display-buffer=, Emacs 24+) before calling plain
 =display-buffer= with no action. With the default action,
 =display-buffer= is free to reuse the selected window for the
 destination.
@@ -235,11 +278,14 @@ destination.
 ** Proposed change
 
 Bind =display-buffer-overriding-action= with =(inhibit-same-
-window . t)= and wrap in =save-selected-window= so focus returns
-to =*Bmkp List*= even if the handler transiently selects the
-destination. While there, add =TAB= as an alias for =C-o=
-(convention in vertico, dired-preview, and similar list
-buffers).
+window . t)= and wrap in =save-selected-window= so focus
+returns to =*Bookmark List*= even if the handler transiently
+selects the destination.
+
+Separately (not part of the bug fix, purely a usability tweak):
+add =TAB= as an alias for =C-o= in =bookmark-bmenu-mode-map=,
+matching the convention in =vertico=, =dired-preview=, and
+similar list buffers.
 
 ** Origin
 
@@ -250,10 +296,10 @@ Downstream commit in =dmgerman/bookmark-x=:
 
 ** Symptom
 
-Previewing a Dired bookmark from =*Bmkp List*= (=C-o= or =TAB=)
-replaces the =*Bmkp List*= window's buffer with the Dired
-buffer, instead of showing Dired in another window. Only affects
-records whose handler is =bmkp-jump-dired= (produced by
+Previewing a Dired bookmark from =*Bookmark List*= (=C-o=)
+replaces the =*Bookmark List*= window's buffer with the Dired
+buffer, instead of showing Dired in another window. Only
+affects records whose handler is =bmkp-jump-dired= (produced by
 =bmkp-set= from inside a dired buffer). Plain file / autofile
 bookmarks pointing at the same directory work correctly.
 
@@ -262,28 +308,34 @@ bookmarks pointing at the same directory work correctly.
 1. =M-x dired /tmp/=.
 2. =bmkp-set= to bookmark the dired buffer (handler
    =bmkp-jump-dired= is stored on the record).
-3. =M-x bmkp-bmenu-list=, move to that bookmark, press =C-o=.
-4. Expected: Dired opens in another window, =*Bmkp List*=
-   remains selected. Observed: =*Bmkp List*= replaced by Dired
-   in place.
+3. =M-x bookmark-bmenu-list=, move to that bookmark, press
+   =C-o=.
+4. Expected: Dired opens in another window, =*Bookmark List*=
+   remains selected. Observed: =*Bookmark List*= replaced by
+   Dired in place.
+
+This reproducer assumes Bug 2's fix is applied. Without it, the
+=C-o= caller doesn't install =display-buffer-overriding-action=
+in the first place, so the symptom looks the same but
+originates from Bug 2, not Bug 3.
 
 ** Root cause
 
-=bmkp-list-switch-other-window= installs
-=display-buffer-overriding-action= with =(inhibit-same-window .
-t)= and dispatches via =display-buffer=. Inside
+=bookmark-bmenu-switch-other-window= (with Bug 2 fixed)
+installs =display-buffer-overriding-action= with =(inhibit-
+same-window . t)= and dispatches via =display-buffer=. Inside
 =bmkp-jump-dired=, the =cl-case= on
 =bmkp-jump-display-function= folds =display-buffer= into the
 same arm as the same-window defaults and calls plain =dired=,
 which uses =switch-to-buffer= internally. =switch-to-buffer=
 does not consult =display-buffer-overriding-action=, so it
-replaces the =*Bmkp List*= buffer in its window.
+replaces the =*Bookmark List*= buffer in its window.
 
 Second bug hiding behind the first: the tail logic after the
-=cl-case= calls =goto-char POS=. Without =set-buffer= in effect,
-point moves in whichever buffer is current — potentially =*Bmkp
-List*= — and the next read of the bookmark at point returns the
-wrong record.
+=cl-case= calls =goto-char POS=. Without =set-buffer= in
+effect, point moves in whichever buffer is current —
+potentially =*Bookmark List*= — and the next read of the
+bookmark at point returns the wrong record.
 
 ** Proposed change
 
@@ -296,105 +348,68 @@ logic runs in the dired buffer.
 
 The same shape of bug likely exists in =bmkp-jump-info=,
 =bmkp-jump-eww=, =bmkp-jump-man=, and =bmkp-jump-w3m=. Not
-audited in this downstream; each calls a mode entry point that
-internally uses =switch-to-buffer= or a display convention that
-ignores =display-buffer-overriding-action=. Bug 1's Approach B
-would paper over the symptoms for those handlers, but a per-
-handler fix on the model of this patch is cleaner.
+audited; each calls a mode entry point that internally uses
+=switch-to-buffer= or a display convention that ignores
+=display-buffer-overriding-action=. Bug 1's Approach B would
+paper over the symptoms for those handlers, but a per-handler
+fix on the model of this patch is cleaner.
 
 ** Origin
 
 Downstream commit in =dmgerman/bookmark-x=:
 [[https://github.com/dmgerman/bookmark-x/commit/a07d516][=a07d516=]].
 
-* Bug 4 — =a e= in =*Bmkp List*= prompts instead of acting on point
-
-** Symptom
-
-In =*Bmkp List*=, the =a e= keybinding is documented as "Edit
-the annotation of the bookmark on this line." Instead, it calls
-=bmkp-edit-annotation=, which prompts for a bookmark name via
-=completing-read=. Inconsistent with =a a= (show), the =T=
-prefix (tag operations), and every other =*Bmkp List*= command
-that operates on point.
-
-** Reproducer
-
-1. =M-x bmkp-bmenu-list=.
-2. Move point to any bookmark.
-3. =a e=.
-4. Expected: annotation-edit buffer opens for the bookmark on
-   that line. Observed: prompted for a bookmark name.
-
-** Proposed change
-
-Introduce a bmenu-aware wrapper (=bmkp-bmenu-edit-annotation=)
-that reads the bookmark from the current line and dispatches to
-=bmkp-edit-annotation= with that name, and rebind =a e= to it.
-
-** Note for the maintainer
-
-If the intent was to keep =bmkp-edit-annotation= as the
-interactive "pick any bookmark" entry point (analogous to
-=bmkp-show-annotation=), rebinding =a e= to a bmenu-aware
-wrapper preserves that: the global command is unchanged; only
-the =*Bmkp List*= binding changes.
-
-** Origin
-
-Downstream commit in =dmgerman/bookmark-x=:
-[[https://github.com/dmgerman/bookmark-x/commit/9d1c82f][=9d1c82f=]].
-
 * Bug 5 — Save prompts to reload the file Emacs just wrote
 
-** Symptom
+** Status
+
+Real gap between =bookmark-plus='s redefined
+=bookmark-write-file= and vanilla behavior, but does not
+produce the described symptom in a pure =bookmark-plus= session.
+See below.
+
+** Symptom (described, does not manifest in pure =bookmark-plus=)
 
 If the user's bookmark file (=bookmark-default-file=, or
-whichever file is tracked by =bookmark-bookmarks-timestamp=) is
-the one being saved, Emacs prompts on the *next* access to
-reload it — because =bookmark-maybe-load-default-file= sees the
-file's modification time is newer than the recorded timestamp.
-
-** Reproducer
-
-1. Set =bookmark-default-file= to a shared bookmark file that
-   bookmark-plus is also writing (a common setup for users who
-   use the built-in =bookmark= functions and =bookmark-plus= in
-   the same session).
-2. Add a bookmark (=bmkp-set=), let =bookmark-save-flag= write.
-3. Perform any command that calls
-   =bookmark-maybe-load-default-file= (e.g. =M-x bookmark-
-   jump=).
-4. Expected: no prompt. Observed: "Bookmark file X has changed
-   on disk. Reload it? (y or n)" for the file Emacs itself just
-   wrote.
+whichever file is tracked by =bookmark-bookmarks-timestamp=)
+is the one being saved, one might expect Emacs to prompt on the
+*next* access to reload it — because
+=bookmark-maybe-load-default-file= would see the file's
+modification time is newer than the recorded timestamp.
 
 ** Root cause
 
-=bmkp-write-bookmark-file= (the =bookmark-plus= replacement for
-=bookmark-write-file=) writes the file but does not update
-=bookmark-bookmarks-timestamp= — the mtime cache the built-in
-loader consults. The built-in =bookmark-write-file= updates it
-via =bookmark-set-bookmarks-timestamp=; the plus replacement
-does not.
+=bookmark-plus= redefines =bookmark-write-file= (in
+=bookmark+-1.el= at ~line 3553). The redefined function writes
+the file but does not update =bookmark-bookmarks-timestamp=.
+Vanilla's =bookmark-write-file= updates it via
+=bookmark-set-bookmarks-timestamp=; the =bookmark-plus=
+redefinition dropped that call.
+
+** Why the symptom does not appear
+
+=bookmark-plus= also redefines =bookmark-maybe-load-default-
+file= (=bookmark+-1.el= at ~line 2892) to use a boolean
+=bmkp-bookmarks-already-loaded= instead of consulting
+=bookmark-bookmarks-timestamp=. Since it never checks the
+file's modification time, it never prompts to reload.
+
+The reload-prompt symptom would only appear if vanilla
+=bookmark-maybe-load-default-file= somehow ran while
+=bookmark-plus= was loaded — an unusual configuration.
 
 ** Proposed change
 
-Update =bookmark-bookmarks-timestamp= at the end of the write
-path when the on-disk file is the one the built-in loader
-tracks. Skip the ADD path — that flow writes records that are
-not in =bookmark-alist=, and updating the timestamp there would
-hide genuine external changes.
+If, for cross-tool compatibility, the maintainer wants to keep
+=bookmark-bookmarks-timestamp= in sync anyway (so that vanilla
+=bookmark= command interoperability doesn't misbehave), update
+the timestamp at the end of =bookmark-write-file= when the
+on-disk file is the one the built-in loader tracks. Skip the
+ADD path — that flow writes records that are not in
+=bookmark-alist=, and updating the timestamp there would hide
+genuine external changes.
 
-** Note for the maintainer
-
-The reference commit was in the downstream after the =bmkx-*=
-rename (=bookmark-x-1.el= downstream vs =bookmark+-1.el=
-upstream) and used the hook symbol =bmkx-write-bookmark-file-
-hook=. The proposed patch in the companion document renames
-those back to their =bookmark-plus= names. The core change —
-updating =bookmark-bookmarks-timestamp= at the end of a
-successful full write — is unchanged.
+Otherwise, this entry can be dropped.
 
 ** Origin
 
@@ -403,11 +418,18 @@ Downstream commit in =dmgerman/bookmark-x=:
 
 * Bug 6 — Consult-driven jump loads the file but does not display it
 
+** Preamble
+
+This entry is conditional: it presupposes a preview-aware
+reader that routes =bookmark-jump= (or an equivalent
+=bmkp-jump= variant) through =consult--read=. =bookmark-plus=
+as shipped does not do that; the entry is included in case
+such an integration lands.
+
 ** Symptom
 
 With =consult= and =vertico= as the completion UI, invoking a
-jump-through-consult path (e.g. =bmkp-jump= with a preview-aware
-reader routed through =consult--read=) exhibits this sequence:
+jump-through-consult path exhibits this sequence:
 
 1. Preview shows the destination correctly during candidate
    navigation.
@@ -416,80 +438,60 @@ reader routed through =consult--read=) exhibits this sequence:
    is loaded (buffer alive), but no window changes — the user
    is left in the calling buffer, not the destination.
 
-** Reproducer
-
-Repro depends on which reader wrapper is in use downstream (the
-downstream code lives in =bmkx-jump-1= /
-=bmkx-read-bookmark-for-jump= in =bookmark-x-1.el=). The essence
-is: a preview-aware reader that delegates to =consult--read=
-with the =consult-bookmark= preview state callback, then hands
-the selected bookmark to a jump function which sets
-=bmkp-jump-display-function= but does not force display after
-handler-only handlers.
-
 ** Root cause (working theory)
 
 Consult's preview callback leaves the destination buffer alive
 but undisplayed once the user selects. The subsequent
-=bookmark-jump= path relies on =bmkp--jump-via= to call the
+=bookmark-jump= path relies on =bookmark--jump-via= to call the
 display function; for default-handler bookmarks that works, but
 for custom-handler bookmarks whose handler only =set-buffer='s
 (Bug 1 above), no display happens.
 
-For default-handler bookmarks, an interaction with
-=bookmark-automatically-show-annotations= or consult's own
-=save-window-excursion= appears to swallow the display. The
-downstream fix restructures the jump path so the display
-function is called unconditionally on the final destination
-buffer at the end, after all handler flavors, and also filters
-temporary bookmarks out of the persisted set.
-
 ** Proposed change
 
-Two behavioral guarantees to add (implementation left to the
-maintainer):
+*Display half.* Fixed by Bug 1 — once =bookmark--jump-via=
+either dispatches display itself (Approach B) or every custom
+handler learns to invoke =bmkp-jump-display-function= (Approach
+A), the consult flow gets its display too. No additional
+change needed here.
 
-1. When a custom handler ran but the destination buffer is not
-   displayed in any window at the end of =bmkp--jump-via=, call
-   =display-function= on it. (Bug 1's Approach B handles this
-   automatically; if Approach A is adopted instead, each
-   handler covers itself.)
-2. In the persisted bookmark write path, filter out records
-   flagged as temporary — a =bmkp-temporary-bookmark-p=
-   predicate is a natural gate — so they do not survive across
-   sessions.
+*Temporary-bookmark filter.* Already implemented in
+=bookmark-plus=: =bookmark-write-file= (=bookmark+-1.el= at
+~line 3604) wraps its record dump in
+=(unless (bmkp-temporary-bookmark-p bmk) ...)=. Temporary
+bookmarks do not survive across sessions. Nothing to add.
 
-** Note for the maintainer
-
-The downstream reference implementation is 150+ lines in
-=bookmark-x-1.el= interleaved with the =bmkx-*= rename. Rather
-than paste an adapted diff of uncertain fidelity, the companion
-document describes the two behavioral guarantees the maintainer
-should add and lets the maintainer pick the implementation. The
-downstream commit can be read for the concrete filtering logic
-and the redesigned jump flow; the renames from =bmkx-*= back to
-=bmkp-*= are mechanical.
+If a preview-aware consult wrapper is introduced later and the
+display symptom persists after Bug 1's fix, revisit this entry
+with a concrete reproducer.
 
 ** Origin
 
 Downstream commit in =dmgerman/bookmark-x=:
 [[https://github.com/dmgerman/bookmark-x/commit/9fb3420][=9fb3420=]].
+The downstream fix is 150+ lines interleaved with the =bmkx-*=
+rename. Not adapted here because the two behaviors it targets
+(display, temp-filter) are already covered by Bug 1 and by
+existing =bookmark-plus= code.
 
 * Relationships
 
 - *Bugs 1 and 6* — the display half of Bug 6 is closed by
-  Bug 1 (either approach). Bug 6's second half (temporary-
-  bookmark filter on write) is independent.
+  Bug 1 (either approach). Bug 6's temp-filter half is
+  already implemented in =bookmark-plus=; nothing to add.
 - *Bugs 2 and 3* — Bug 2's overriding-action installation is
   the caller that Bug 3's handler mishandles. Both need
   fixing; either alone still shows the symptom in some
   scenarios.
-- *Bugs 4 and 5* — standalone.
+- *Bug 5* — standalone, and does not manifest under
+  =bookmark-plus= as-shipped because the loader is
+  redefined; retained as a real gap only in case
+  cross-tool interoperability matters.
 
 * See also
 
 - [[file:plus-potential-bugs.org][=plus-potential-bugs.org=]] —
-  same six bugs with concrete =diff= patches against
+  same bugs with concrete =diff= patches against
   =bookmark+-*.el= file paths.
 - [[file:porting.org][=porting.org=]] — the full porting log
   from =bookmark-x= to =bookmark-plus-gt= (features + bugs +
