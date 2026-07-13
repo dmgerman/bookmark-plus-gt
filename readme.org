@@ -1,1 +1,82 @@
-Nothing yet
+#+TITLE: bookmark-plus-gt
+#+STARTUP: overview
+
+Non-invasive extensions on top of [[https://github.com/dmgerman/bookmark-plus][Bookmark+]].  Symbols under =bmkp-gt-=.
+Bookmark+ itself is not modified.
+
+* Install
+
+#+begin_src emacs-lisp
+(use-package bookmark-plus-gt-preview
+  :load-path "~/.emacs.d/modules/bookmark-plus-gt"
+  :straight nil
+  :after bookmark+)
+#+end_src
+
+* Commands
+
+- =bmkp-gt-jump=, =bmkp-gt-jump-other-window=, =bmkp-gt-jump-other-frame= —
+  drop-in replacements for =bookmark-jump= et al.  When =consult= is
+  loaded (and =bmkp-gt-preview-use-consult-flag= is non-nil), the read
+  is done through =consult--read= with live preview.  Falls back to
+  =bookmark-completing-read= otherwise.  Bind them wherever you want;
+  the standard Bookmark+ keys are left alone.
+
+- =bmkp-gt-list-preview-mode= — buffer-local minor mode for
+  =*Bookmark List*=.  With point on a row, the destination opens in
+  another window (analog of =next-error-follow-minor-mode=).  For
+  always-on:
+  =(add-hook 'bookmark-bmenu-mode-hook #'bmkp-gt-list-preview-mode)=.
+
+* Minibuffer filtering (=bmkp-gt-jump=)
+
+Every candidate carries hidden tokens matched by orderless/substring:
+
+- =@Type= — group label from =bmkp-gt-jump-narrow=
+  (=@File=, =@Dired=, =@Web=, =@Magit=, =@Epub=, …).  =@= avoids
+  Orderless's =!= negation dispatcher.
+- =#tag= — every tag on the bookmark.  Stackable (=#work #urgent=).
+
+Facet keys inside the minibuffer:
+
+- =M-t= — add a tag filter (completing-read from all tags).
+- =M-D= — pop the last filter.
+- =M-T= — clear all filters.
+
+Type narrowing uses =consult-narrow-key=; e.g. with it set to ="C-+"=,
+=C-+ d= narrows to Dired.  Without it: =M-x consult-narrow=.
+
+* Annotations
+
+When marginalia is loaded, =bmkp-gt-bookmark-annotation= registers on
+the =bookmark= category and adds a padded =#tag= column, then
+rewrites marginalia's type column to use =bmkp-gt-jump-narrow=
+labels (so what you see matches what =@= filters).  Non-file
+bookmarks show their =location= URL instead of the =- no file -=
+placeholder.
+
+* Preview errors
+
+Preview attempts (both paths) run under =condition-case=.  Failure
+prints one line —
+=bmkp-gt: preview failed for NAME: ERROR= — rate-limited to one per
+bookmark name.
+
+* Options
+
+| Option                                   | Purpose                                     |
+|------------------------------------------+---------------------------------------------|
+| =bmkp-gt-preview-use-consult-flag=       | Toggle the consult reader (default =t=).    |
+| =bmkp-gt-jump-narrow=                    | Handler → group mapping (label + narrow key). |
+| =bmkp-gt-jump-group-by=                  | =nil= / =type= / =tag=.                     |
+| =bmkp-gt-jump-sort-by=                   | =mru= / =visits= / =alpha=.                 |
+| =bmkp-gt-jump-candidate-format-function= | Builds each =consult--read= candidate.      |
+| =bmkp-gt-bookmark-location-function=     | Display location for a bookmark record.     |
+| =bmkp-gt-list-preview-display-action=    | =display-buffer= action for list preview.   |
+
+Customize group: =bookmark-plus-gt=.
+
+* Dev
+
+=make test= · =make compile= · =make clean=.  Porting log:
+=ai/porting.org=.
