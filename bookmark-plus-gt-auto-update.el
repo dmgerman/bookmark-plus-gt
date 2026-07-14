@@ -121,22 +121,14 @@ not currently running."
   "Return non-nil if bookmark record BMK has the `auto-update' property."
   (bookmark-prop-get (car bmk) 'auto-update))
 
-(defconst bmkp-gt-auto-update--preserve-fields
-  '(id tags annotation auto-update
-    created visits last-visited defaults)
-  "Fields that survive an auto-update refresh.
-Everything else in the fresh bookmark record replaces the
-bookmark's stored value.  This inverse-whitelist design means
-new bookmark types (text, PDF, Info, EWW, and any mode that
-provides its own `bookmark-make-record-function') update
-correctly without touching this list.")
+(defvar bmkp-gt--refresh-preserve-fields) ; In `bookmark-plus-gt.el'.
 
 (defun bmkp-gt-auto-update--refresh (bmk buffer)
   "Refresh BMK's location from BUFFER's current state.
 Calls BUFFER's `bookmark-make-record-function' so the update
 uses the mode-appropriate recorder.  Every field in the fresh
 record replaces the bookmark's value, except those in
-`bmkp-gt-auto-update--preserve-fields' (id, tags, annotation,
+`bmkp-gt--refresh-preserve-fields' (id, tags, annotation,
 auto-update, created, visits, last-visited, defaults).
 
 Pins `end-position' to `position' so upstream's region-restore
@@ -165,7 +157,7 @@ path is not taken for the refreshed bookmark."
            (fresh (if (stringp (car-safe raw)) (cdr raw) raw)))
       (dolist (cell fresh)
         (let ((field (car cell)))
-          (unless (memq field bmkp-gt-auto-update--preserve-fields)
+          (unless (memq field bmkp-gt--refresh-preserve-fields)
             (bookmark-prop-set (car bmk) field (cdr cell)))))
       (let ((pos (bookmark-prop-get (car bmk) 'position)))
         (when pos

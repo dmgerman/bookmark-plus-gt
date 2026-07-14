@@ -45,7 +45,19 @@
 (require 'bookmark)
 (require 'bookmark+)
 
-(declare-function bmkp-default-bookmark-name "bookmark+-1")
+(declare-function bmkp-default-bookmark-name       "bookmark+-1")
+(declare-function bmkp-this-file/buffer-alist-only "bookmark+-1")
+
+(defvar pdf-view--bookmark-to-restore) ; In `pdf-view' (pdf-tools).
+
+(defconst bmkp-gt--refresh-preserve-fields
+  '(id tags annotation auto-update
+    created visits last-visited defaults)
+  "Fields that survive an in-place bookmark-location refresh.
+Every other field in the fresh record (produced by the buffer's
+`bookmark-make-record-function') replaces the bookmark's stored
+value.  Used by both `bmkp-gt-relocate-here' and the auto-update
+tick.")
 
 (defgroup bookmark-plus-gt nil
   "Non-invasive extensions to Bookmark+."
@@ -162,10 +174,15 @@ cannot clobber the outer call's value."
 
 ;;;###autoload
 (defun bmkp-gt-relocate-here (bookmark &optional set-auto-update)
-  "Point BOOKMARK at the current buffer's file and position.
-Preserves the bookmark's name, tags, annotation, handler, and
-every property other than the location fields (filename,
-buffer-name, position, context strings, and end-position).
+  "Point BOOKMARK at the current buffer's location.
+Uses the buffer's own `bookmark-make-record-function' so the
+update captures the mode-appropriate fields (page/slice/size
+for PDF, info-node for Info, location for EWW, magit-hidden-
+sections for magit, dired-directory for Dired, and so on).
+Every field in the fresh record replaces the bookmark's stored
+value, except those in `bmkp-gt--refresh-preserve-fields' (id,
+tags, annotation, auto-update, created, visits, last-visited,
+defaults).
 
 Pins `end-position' to the new `position' so upstream's
 region-restore path is not taken for the relocated bookmark.
@@ -177,18 +194,57 @@ tracking is enabled (see `bmkp-gt-auto-update-mode')."
    (list (bookmark-completing-read "Relocate bookmark"
                                    (bmkp-default-bookmark-name))
          current-prefix-arg))
-  (let* ((fresh  (bookmark-make-record-default))
-         (pos    (alist-get 'position fresh)))
-    (dolist (field '(filename buffer-name position
-                     front-context-string rear-context-string
-                     front-context-region-string rear-context-region-string))
-      (bookmark-prop-set bookmark field (alist-get field fresh)))
+  (let* ((raw
+          ;; pdf-view's recorder short-circuits to the cached
+          ;; bookmark when `pdf-view--bookmark-to-restore' is set.
+          ;; Force a fresh snapshot by let-binding it to nil.
+          (let ((pdf-view--bookmark-to-restore nil))
+            (funcall bookmark-make-record-function)))
+         ;; `bookmark-make-record-function' returns either a raw
+         ;; data alist (default text recorder) or a (NAME . DATA)
+         ;; pair (pdf-view, info, eww, magit, gnus, etc.).
+         (fresh (if (stringp (car-safe raw)) (cdr raw) raw))
+         (pos   (alist-get 'position fresh)))
+    (dolist (cell fresh)
+      (let ((field (car cell)))
+        (unless (memq field bmkp-gt--refresh-preserve-fields)
+          (bookmark-prop-set bookmark field (cdr cell)))))
     (when pos (bookmark-prop-set bookmark 'end-position pos))
     (when set-auto-update
       (bookmark-prop-set bookmark 'auto-update t))
     (when (called-interactively-p 'interactive)
       (message "Relocated `%s'%s." bookmark
                (if set-auto-update " (auto-update ON)" "")))))
+
+
+;;;###autoload
+(defun bmkp-gt-relocate-this-file-here (bookmark &optional set-auto-update)
+  "Relocate a bookmark for the current file/buffer to point at point.
+Prompts only among bookmarks whose file is the current buffer's
+file (or, for non-file buffers, whose buffer is the current
+buffer).  If exactly one such bookmark exists, use it without
+prompting.  Delegates the field surgery to `bmkp-gt-relocate-here'.
+
+With a prefix argument (non-nil SET-AUTO-UPDATE), also set the
+`auto-update' property on the chosen bookmark.
+
+Signals an error when no bookmark points at this file/buffer."
+  (interactive
+   (let ((candidates (bmkp-this-file/buffer-alist-only)))
+     (cond
+      ((null candidates)
+       (user-error "No bookmarks point at this file/buffer"))
+      ((null (cdr candidates))
+       (list (bookmark-name-from-full-record (car candidates))
+             current-prefix-arg))
+      (t
+       (list (bookmark-completing-read "Relocate bookmark (this file)"
+                                       (bmkp-default-bookmark-name candidates)
+                                       candidates)
+             current-prefix-arg)))))
+  (bmkp-gt-relocate-here bookmark set-auto-update)
+  (message "Relocated `%s'%s." bookmark
+           (if set-auto-update " (auto-update ON)" "")))
 
 
 (provide 'bookmark-plus-gt)

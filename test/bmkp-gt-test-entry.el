@@ -152,5 +152,62 @@
           (should (eq 'sentinel-outer bmkp-jump-display-function)))))))
 
 
+(ert-deftest bmkp-gt-test-relocate/copies-mode-specific-fields ()
+  "Relocate uses the buffer's `bookmark-make-record-function' and copies
+mode-specific fields (magit-like: no filename dependency on
+`buffer-file-name', custom keys).  Regression: before switching to the
+buffer-local recorder, this raised `bookmark-buffer-file-name: Buffer
+not visiting a file or directory' in non-file buffers."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer src "hello"
+      (bmkp-gt-test--make-bookmark "mode-target" src 1))
+    (let ((magit-like-buf (generate-new-buffer " *bmkp-gt-test-magit*")))
+      (unwind-protect
+          (with-current-buffer magit-like-buf
+            ;; Simulate a magit-style buffer: no `buffer-file-name',
+            ;; custom `bookmark-make-record-function' returning fields
+            ;; that don't route through `bookmark-buffer-file-name'.
+            (setq-local bookmark-make-record-function
+                        (lambda ()
+                          '("magit-view"
+                            (filename . "/some/repo/")
+                            (position . 42)
+                            (magit-hidden-sections . ((untracked)))
+                            (handler . my-magit-handler))))
+            ;; Must not raise `bookmark-buffer-file-name' error.
+            (bmkp-gt-relocate-here "mode-target"))
+        (kill-buffer magit-like-buf)))
+    (should (= 42 (bookmark-prop-get "mode-target" 'position)))
+    (should (equal "/some/repo/"
+                   (bookmark-prop-get "mode-target" 'filename)))
+    (should (equal '((untracked))
+                   (bookmark-prop-get "mode-target" 'magit-hidden-sections)))
+    (should (eq 'my-magit-handler
+                (bookmark-prop-get "mode-target" 'handler)))))
+
+
+;;; bmkp-gt-relocate-this-file-here ------------------------------------
+
+(ert-deftest bmkp-gt-test-relocate-this-file/single-match-updates-fields ()
+  "One bookmark for the current file: relocated non-interactively."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "hello\nworld\n"
+      (bmkp-gt-test--make-bookmark "only" buf 1)
+      (let ((end (with-current-buffer buf
+                   (goto-char (point-max))
+                   (point-max))))
+        (with-current-buffer buf
+          (bmkp-gt-relocate-this-file-here "only"))
+        (should (= end (bookmark-prop-get "only" 'position)))))))
+
+(ert-deftest bmkp-gt-test-relocate-this-file/errors-when-no-match ()
+  "No bookmarks for the current buffer: user-error, no state change."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "content\n"
+      (with-current-buffer buf
+        (should-error (call-interactively #'bmkp-gt-relocate-this-file-here)
+                      :type 'user-error)))))
+
+
 (provide 'bmkp-gt-test-entry)
 ;;; bmkp-gt-test-entry.el ends here

@@ -87,6 +87,12 @@ they are not features you can meaningfully opt out of:
   Defined in the entry point and always available, independent of
   =bmkp-gt-features=.
 
+- =bmkp-gt-relocate-this-file-here= — same as =bmkp-gt-relocate-here=,
+  but scoped: only bookmarks pointing at the current file/buffer are
+  offered.  If exactly one such bookmark exists it is used without
+  prompting; the message reports which name was updated.  Errors if
+  no bookmarks match.  Same =C-u= behavior.
+
 * Minibuffer filtering (=bmkp-gt-jump=)
 
 Every candidate carries hidden tokens matched by orderless/substring:
