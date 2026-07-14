@@ -255,5 +255,27 @@ still be applied or consult could not lookup the candidate."
         (should (string-prefix-p "cand-fallback" cand))))))
 
 
+(ert-deftest bmkp-gt-test-preview/sort-mru-uses-last-visited ()
+  "`bmkp-gt--sort-candidates' with `mru' orders by `last-visited',
+not by `last-modified'.  Regression: bookmark-plus (unlike bookmark-x)
+does not update `last-modified' on jump, so `last-visited' is the
+only correct MRU signal."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "older" buf)
+      (bmkp-gt-test--make-bookmark "newer" buf))
+    ;; older visited long ago; newer visited recently.
+    (bookmark-prop-set "older" 'last-visited '(20000 0))
+    (bookmark-prop-set "newer" 'last-visited '(30000 0))
+    ;; Make last-modified go the OTHER way — if the sort were still
+    ;; using last-modified this would fail.
+    (bookmark-prop-set "older" 'last-modified '(40000 0))
+    (bookmark-prop-set "newer" 'last-modified '(10000 0))
+    (let* ((bmkp-gt-jump-sort-by 'mru)
+           (sorted (bmkp-gt--sort-candidates
+                    (list (propertize "older") (propertize "newer")))))
+      (should (equal '("newer" "older")
+                     (mapcar #'substring-no-properties sorted))))))
+
 (provide 'bmkp-gt-test-preview)
 ;;; bmkp-gt-test-preview.el ends here

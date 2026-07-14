@@ -113,6 +113,80 @@ in `bmkp-handle-region-default' never fires on an auto-update bookmark."
         (should (= end (bookmark-prop-get "range" 'position)))
         (should (= end (bookmark-prop-get "range" 'end-position)))))))
 
+(defun bmkp-gt-test-auto-update--bookmark-overlay-positions (buffer)
+  "Return sorted starts of category-`bookmark' overlays in BUFFER."
+  (with-current-buffer buffer
+    (sort (mapcar #'overlay-start
+                  (seq-filter (lambda (o) (eq 'bookmark (overlay-get o 'category)))
+                              (overlays-in (point-min) (point-max))))
+          #'<)))
+
+(ert-deftest bmkp-gt-test-auto-update/tick-moves-fringe-mark ()
+  "`--tick' moves the built-in fringe overlay to the new position."
+  (let ((bookmark-set-fringe-mark 'bookmark-mark))
+    (bmkp-gt-test-with-clean-bookmarks
+      (bmkp-gt-test-with-fixture-buffer buf "aaa\nbbb\nccc\n"
+        (bmkp-gt-test--make-bookmark "movef" buf 1)
+        (bookmark-prop-set "movef" 'auto-update t)
+        ;; Move point past the first line and refresh.
+        (with-current-buffer buf (goto-char 5))  ; inside "bbb" line
+        (bmkp-gt-auto-update--tick)
+        (let ((positions
+               (bmkp-gt-test-auto-update--bookmark-overlay-positions buf)))
+          (should (= 1 (length positions)))
+          (should (= 5 (car positions))))))))
+
+(ert-deftest bmkp-gt-test-auto-update/tick-skips-fringe-when-flag-off ()
+  "`--tick' does not add fringe marks when `bookmark-set-fringe-mark' is nil.
+The bookmark's own fringe (if any) was placed at creation time; the
+tick's remove/set pair is guarded by the flag."
+  (let ((bookmark-set-fringe-mark nil))
+    (bmkp-gt-test-with-clean-bookmarks
+      (bmkp-gt-test-with-fixture-buffer buf "aaa\nbbb\n"
+        (bmkp-gt-test--make-bookmark "no-fringe" buf 1)
+        (bookmark-prop-set "no-fringe" 'auto-update t)
+        (with-current-buffer buf (goto-char (point-max)))
+        (bmkp-gt-auto-update--tick)
+        (should
+         (null (bmkp-gt-test-auto-update--bookmark-overlay-positions buf)))))))
+
+(defun bmkp-gt-test-auto-update--light-overlay-positions (buffer)
+  "Return sorted starts of category-`bookmark-plus' overlays in BUFFER."
+  (with-current-buffer buffer
+    (sort (mapcar #'overlay-start
+                  (seq-filter (lambda (o) (eq 'bookmark-plus (overlay-get o 'category)))
+                              (overlays-in (point-min) (point-max))))
+          #'<)))
+
+(ert-deftest bmkp-gt-test-auto-update/tick-moves-plus-light ()
+  "`--tick' moves bookmark-plus's persistent line highlight to the new position."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "aaa\nbbb\nccc\n"
+      (bmkp-gt-test--make-bookmark "moveh" buf 1)
+      (bookmark-prop-set "moveh" 'auto-update t)
+      ;; Light the bookmark manually — do not depend on auto-light-when-*.
+      (let ((bmk (assoc "moveh" bookmark-alist)))
+        (bmkp-light-bookmark bmk))
+      (should (equal '(1)
+                     (bmkp-gt-test-auto-update--light-overlay-positions buf)))
+      ;; Move point past the first line; tick moves the highlight.
+      (with-current-buffer buf (goto-char 5))  ; inside "bbb"
+      (bmkp-gt-auto-update--tick)
+      (let ((positions (bmkp-gt-test-auto-update--light-overlay-positions buf)))
+        (should (= 1 (length positions)))
+        (should (= 5 (car positions)))))))
+
+(ert-deftest bmkp-gt-test-auto-update/tick-does-not-light-unlit-bookmark ()
+  "`--tick' leaves an unlit bookmark alone (respects user's lighting choice)."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "aaa\nbbb\n"
+      (bmkp-gt-test--make-bookmark "unlit" buf 1)
+      (bookmark-prop-set "unlit" 'auto-update t)
+      (with-current-buffer buf (goto-char (point-max)))
+      (bmkp-gt-auto-update--tick)
+      (should
+       (null (bmkp-gt-test-auto-update--light-overlay-positions buf))))))
+
 (ert-deftest bmkp-gt-test-auto-update/tick-skips-untracked ()
   "`--tick' leaves position unchanged for bookmarks without the property."
   (bmkp-gt-test-with-clean-bookmarks
