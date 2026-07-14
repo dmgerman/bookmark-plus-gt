@@ -11,6 +11,11 @@ Bookmark+ itself is not modified.
   :load-path "~/.emacs.d/modules/bookmark-plus-gt"
   :straight nil
   :after bookmark+)
+
+(use-package bookmark-plus-gt-tags
+  :load-path "~/.emacs.d/modules/bookmark-plus-gt"
+  :straight nil
+  :after bookmark+)
 #+end_src
 
 * Commands
@@ -28,6 +33,12 @@ Bookmark+ itself is not modified.
   always-on:
   =(add-hook 'bookmark-bmenu-mode-hook #'bmkp-gt-list-preview-mode)=.
 
+- =bmkp-gt-bmenu-toggle-tags= — show/hide the tags column in
+  =*Bookmark List*=.  Bound to =;=.
+
+- =bmkp-gt-bmenu-toggle-type= — show/hide the type column in
+  =*Bookmark List*=.  Bound to =@=.
+
 * Minibuffer filtering (=bmkp-gt-jump=)
 
 Every candidate carries hidden tokens matched by orderless/substring:
@@ -35,7 +46,11 @@ Every candidate carries hidden tokens matched by orderless/substring:
 - =@Type= — group label from =bmkp-gt-jump-narrow=
   (=@File=, =@Dired=, =@Web=, =@Magit=, =@Epub=, …).  =@= avoids
   Orderless's =!= negation dispatcher.
-- =#tag= — every tag on the bookmark.  Stackable (=#work #urgent=).
+- =;tag= — every tag on the bookmark.  Stackable (=;work ;urgent=).
+
+Same characters appear as toggles in =*Bookmark List*= (=;= toggles
+the tags column, =@= toggles the type column), so the mapping
+=;=→tags, =@=→type is consistent across both interfaces.
 
 Facet keys inside the minibuffer:
 
@@ -46,10 +61,26 @@ Facet keys inside the minibuffer:
 Type narrowing uses =consult-narrow-key=; e.g. with it set to ="C-+"=,
 =C-+ d= narrows to Dired.  Without it: =M-x consult-narrow=.
 
+* =*Bookmark List*= columns
+
+With =bookmark-plus-gt-tags= loaded, the list buffer renders two
+extra columns between the name and the filename:
+
+: [marks] [name] [;tag ;tag …] [Type] [filename]
+
+Both columns are on by default and toggleable:
+
+- =;= — =bmkp-gt-bmenu-toggle-tags=
+- =@= — =bmkp-gt-bmenu-toggle-type=
+
+The type label comes from =bmkp-gt-jump-narrow= (same source as the
+consult minibuffer), so =@File=, =@Dired=, =@Web=, etc. mean the same
+thing everywhere.
+
 * Annotations
 
 When marginalia is loaded, =bmkp-gt-bookmark-annotation= registers on
-the =bookmark= category and adds a padded =#tag= column, then
+the =bookmark= category and adds a padded =;tag= column, then
 rewrites marginalia's type column to use =bmkp-gt-jump-narrow=
 labels (so what you see matches what =@= filters).  Non-file
 bookmarks show their =location= URL instead of the =- no file -=
@@ -73,6 +104,11 @@ bookmark name.
 | =bmkp-gt-jump-candidate-format-function= | Builds each =consult--read= candidate.      |
 | =bmkp-gt-bookmark-location-function=     | Display location for a bookmark record.     |
 | =bmkp-gt-list-preview-display-action=    | =display-buffer= action for list preview.   |
+| =bmkp-gt-bmenu-show-tags-flag=           | Show the tags column in the list (default =t=). |
+| =bmkp-gt-bmenu-show-type-flag=           | Show the type column in the list (default =t=). |
+| =bmkp-gt-bmenu-tags-max-width=           | Cap on the tags column width (default =40=).  |
+| =bmkp-gt-bmenu-type-max-width=           | Cap on the type column width (default =20=).  |
+| =bmkp-gt-bmenu-column-gap=               | Space between adjacent columns (default =2=). |
 
 Customize group: =bookmark-plus-gt=.
 

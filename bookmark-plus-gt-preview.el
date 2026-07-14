@@ -45,7 +45,7 @@
 ;;
 ;; The minibuffer-side path also shows each candidate's tags as a
 ;; completion annotation, via `bmkp-gt-bookmark-annotation'.  The
-;; annotator is additive: it prepends a `#tag #tag ...' segment to
+;; annotator is additive: it prepends a `;tag ;tag ...' segment to
 ;; whatever `marginalia-annotate-bookmark' would otherwise return
 ;; (type / file / location), so the existing bookmark completion
 ;; display is preserved and tags are added in front of it.  When
@@ -57,7 +57,7 @@
 ;; augmented further so the completion matches against tags and so
 ;; bookmark types can be narrowed / grouped:
 ;;
-;;   - Tag tokens (`#name1 #name2 ...') are appended to the candidate
+;;   - Tag tokens (`;name1 ;name2 ...') are appended to the candidate
 ;;     string with `display ""', which keeps them in the candidate for
 ;;     orderless/substring matching while hiding them from view.
 ;;     Typing a tag name in the minibuffer filters the list.
@@ -89,7 +89,7 @@
 ;;         M-T   clear all filters
 ;;
 ;;     Active filters are shown bracketed in the prompt
-;;     (`[#emacs #work] Bookmark: '), and candidates failing any
+;;     (`[;emacs ;work] Bookmark: '), and candidates failing any
 ;;     facet are excluded.  Mutation rebuilds the candidate list by
 ;;     quitting and re-entering `consult--read', driven by
 ;;     `bmkp-gt-jump--restart-flag'.
@@ -372,7 +372,7 @@ Returns a propertized string composed of three parts:
     orderless / substring matching without showing the token.
     `@' avoids orderless's affix-dispatch characters (`!', `,',
     `=', `~', `%', backtick), so the token is matched literally.
-  - Any tag tokens (`#tag1 #tag2 ...'), appended the same way.
+  - Any tag tokens (`;tag1 ;tag2 ...'), appended the same way.
 
 All parts carry the text properties required by `consult--read'
 \(see `bmkp-gt-jump-candidate-format-function' for the contract\):
@@ -424,7 +424,7 @@ To include searchable-but-invisible text (e.g. type-name and tag
 tokens for substring matching), append a `propertize'd segment with
 the `display \"\"' property in addition to the two above.  The
 default formatter appends `@TypeName' (from `bmkp-gt-jump-narrow')
-and `#tag1 #tag2 ...' this way -- overrides that want the same
+and `;tag1 ;tag2 ...' this way -- overrides that want the same
 filtering ergonomics should follow suit.
 
 Customize this when you want to control what appears in the candidate
@@ -542,7 +542,7 @@ Returns a possibly-empty propertized string (no trailing space)."
   (if (null bmkp-gt-jump--active-filters) ""
     (mapconcat (lambda (f)
                  (pcase (car f)
-                   ('tag (propertize (concat "#" (cdr f))
+                   ('tag (propertize (concat ";" (cdr f))
                                      'face 'completions-annotations))
                    (_    (format "%S" f))))
                (reverse bmkp-gt-jump--active-filters)
@@ -761,8 +761,8 @@ rendering."
   :group 'bookmark-plus-gt)
 
 (defun bmkp-gt--tags-segment-raw (tags)
-  "Return TAGS rendered as space-separated `#tag' tokens (a plain string)."
-  (mapconcat (lambda (tag) (concat "#" (if (consp tag) (car tag) tag)))
+  "Return TAGS rendered as space-separated `;tag' tokens (a plain string)."
+  (mapconcat (lambda (tag) (concat ";" (if (consp tag) (car tag) tag)))
              tags " "))
 
 (defvar bmkp-gt--tags-segment-width-cache nil
@@ -826,7 +826,7 @@ present."
 Composes two parts:
 
   - A tags segment built from `bmkp-get-tags', formatted as
-    space-separated `#tag' tokens and padded on the right to the
+    space-separated `;tag' tokens and padded on the right to the
     width of the widest tags segment in `bookmark-alist' so that
     annotations form an aligned column.  Untagged bookmarks emit a
     blank segment of the same width.

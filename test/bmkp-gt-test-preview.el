@@ -217,8 +217,8 @@ Width is preserved so column alignment does not shift."
     (let* ((bm     (assoc "cand-tagged" bookmark-alist))
            (narrow `((,#'bookmark-default-handler . ?f)))
            (cand   (bmkp-gt-jump-candidate-default bm narrow)))
-      (should (string-match-p "#alpha" cand))
-      (should (string-match-p "#beta"  cand))
+      (should (string-match-p ";alpha" cand))
+      (should (string-match-p ";beta"  cand))
       ;; The hidden segment starts right after the bookmark name; its first
       ;; character must carry `display ""'.
       (should (equal "" (get-text-property (length "cand-tagged") 'display cand))))))
