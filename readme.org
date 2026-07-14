@@ -57,6 +57,15 @@ set =bmkp-gt-features= in =:init= (it must be set before the require):
 
 - =bmkp-gt-auto-update-now= — force one refresh pass immediately.
 
+- =bmkp-gt-relocate-here= — point a bookmark (chosen by name) at the
+  current buffer/point.  Preserves the name, tags, annotation,
+  handler, and every other property; only the location fields
+  (filename, buffer-name, position, context strings, end-position)
+  are rewritten.  With a prefix argument (=C-u=), also sets the
+  =auto-update= property on the bookmark so future ticks track it.
+  Defined in the umbrella and always available, independent of
+  =bmkp-gt-features=.
+
 * Minibuffer filtering (=bmkp-gt-jump=)
 
 Every candidate carries hidden tokens matched by orderless/substring:

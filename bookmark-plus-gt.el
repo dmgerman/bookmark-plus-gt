@@ -42,6 +42,11 @@
 
 ;;; Code:
 
+(require 'bookmark)
+(require 'bookmark+)
+
+(declare-function bmkp-default-bookmark-name "bookmark+-1")
+
 (defgroup bookmark-plus-gt nil
   "Non-invasive extensions to Bookmark+."
   :group 'bookmark-plus)
@@ -60,6 +65,40 @@ the default (all features on)."
 
 (dolist (feat bmkp-gt-features)
   (require (intern (format "bookmark-plus-gt-%s" feat))))
+
+
+;;; General commands (always loaded) ------------------------------------
+
+;;;###autoload
+(defun bmkp-gt-relocate-here (bookmark &optional set-auto-update)
+  "Point BOOKMARK at the current buffer's file and position.
+Preserves the bookmark's name, tags, annotation, handler, and
+every property other than the location fields (filename,
+buffer-name, position, context strings, and end-position).
+
+Pins `end-position' to the new `position' so upstream's
+region-restore path is not taken for the relocated bookmark.
+
+With a prefix argument (non-nil SET-AUTO-UPDATE), also set the
+`auto-update' property on BOOKMARK, so future reading-position
+tracking is enabled (see `bmkp-gt-auto-update-mode')."
+  (interactive
+   (list (bookmark-completing-read "Relocate bookmark"
+                                   (bmkp-default-bookmark-name))
+         current-prefix-arg))
+  (let* ((fresh  (bookmark-make-record-default))
+         (pos    (alist-get 'position fresh)))
+    (dolist (field '(filename buffer-name position
+                     front-context-string rear-context-string
+                     front-context-region-string rear-context-region-string))
+      (bookmark-prop-set bookmark field (alist-get field fresh)))
+    (when pos (bookmark-prop-set bookmark 'end-position pos))
+    (when set-auto-update
+      (bookmark-prop-set bookmark 'auto-update t))
+    (when (called-interactively-p 'interactive)
+      (message "Relocated `%s'%s." bookmark
+               (if set-auto-update " (auto-update ON)" "")))))
+
 
 (provide 'bookmark-plus-gt)
 ;;; bookmark-plus-gt.el ends here
