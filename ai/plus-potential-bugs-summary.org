@@ -417,11 +417,6 @@ existing =bookmark-plus= code.
   the caller that Bug 3's handler mishandles. Both need
   fixing; either alone still shows the symptom in some
   scenarios.
-- *Bug 5* — standalone, and does not manifest under
-  =bookmark-plus= as-shipped because the loader is
-  redefined; retained as a real gap only in case
-  cross-tool interoperability matters.
-
 * See also
 
 - [[file:plus-potential-bugs.org][=plus-potential-bugs.org=]] —
