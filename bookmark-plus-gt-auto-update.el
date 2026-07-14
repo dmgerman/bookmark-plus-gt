@@ -57,18 +57,13 @@
 (require 'bookmark+)
 (require 'cl-lib)
 
-(declare-function bmkp-bmenu-list-1              "bookmark+-bmu")
-(declare-function bmkp-bmenu-mode-status-help    "bookmark+-bmu")
-(declare-function bmkp-bookmark-description      "bookmark+-1")
-(declare-function bmkp-refresh/rebuild-menu-list "bookmark+-1")
-(declare-function bmkp-same-file-p               "bookmark+-1")
-(declare-function bookmark--set-fringe-mark      "bookmark")
-(declare-function bookmark--remove-fringe-mark   "bookmark")
-(declare-function bmkp-lighted-p                 "bookmark+-lit")
-(declare-function bmkp-unlight-bookmark          "bookmark+-lit")
-(declare-function bmkp-light-bookmark            "bookmark+-lit")
-
-(defvar bookmark-set-fringe-mark)     ; In `bookmark' (Emacs 28+).
+(declare-function bmkp-bmenu-list-1                 "bookmark+-bmu")
+(declare-function bmkp-bmenu-mode-status-help       "bookmark+-bmu")
+(declare-function bmkp-bookmark-description         "bookmark+-1")
+(declare-function bmkp-refresh/rebuild-menu-list    "bookmark+-1")
+(declare-function bmkp-same-file-p                  "bookmark+-1")
+(declare-function bmkp-gt--refresh-bookmark-fringe  "bookmark-plus-gt")
+(declare-function bmkp-gt--refresh-bookmark-lighting "bookmark-plus-gt")
 
 (defvar bmkp-bmenu-marks-width)     ; In `bookmark+-bmu'.
 (defvar bmkp-bmenu-header-lines)    ; In `bookmark+-bmu'.
@@ -134,14 +129,8 @@ auto-update, created, visits, last-visited, defaults).
 Pins `end-position' to `position' so upstream's region-restore
 path is not taken for the refreshed bookmark."
   (with-current-buffer buffer
-    ;; Remove the existing fringe mark BEFORE updating fields, so
-    ;; `bookmark--remove-fringe-mark' can still find it via the
-    ;; bookmark's pre-update stored position.
-    (when (and (boundp 'bookmark-set-fringe-mark)
-               bookmark-set-fringe-mark
-               (fboundp 'bookmark--remove-fringe-mark))
-      (bookmark--remove-fringe-mark bmk))
-    (let* ((raw
+    (let* ((old-pos (bookmark-prop-get (car bmk) 'position))
+           (raw
             ;; pdf-view's recorder short-circuits to the cached
             ;; bookmark when `pdf-view--bookmark-to-restore' is set
             ;; (a jump/restore is in progress).  Force a fresh
@@ -161,23 +150,9 @@ path is not taken for the refreshed bookmark."
             (bookmark-prop-set (car bmk) field (cdr cell)))))
       (let ((pos (bookmark-prop-get (car bmk) 'position)))
         (when pos
-          (bookmark-prop-set (car bmk) 'end-position pos))
-        ;; Place a fresh fringe mark at the new position.
-        (when (and (boundp 'bookmark-set-fringe-mark)
-                   bookmark-set-fringe-mark
-                   (fboundp 'bookmark--set-fringe-mark)
-                   pos)
-          (save-excursion
-            (goto-char (min pos (point-max)))
-            (bookmark--set-fringe-mark)))))
-    ;; Move the bookmark-plus persistent line highlight to the new
-    ;; position, if the bookmark was lit before the refresh.  Skip
-    ;; unlit bookmarks — the user's `bmkp-auto-light-when-*' choices
-    ;; decided that; we don't second-guess them.
-    (when (and (fboundp 'bmkp-lighted-p)
-               (bmkp-lighted-p bmk))
-      (bmkp-unlight-bookmark bmk 'NOERRORP)
-      (bmkp-light-bookmark bmk))))
+          (bookmark-prop-set (car bmk) 'end-position pos)))
+      (bmkp-gt--refresh-bookmark-fringe   (car bmk) buffer old-pos)
+      (bmkp-gt--refresh-bookmark-lighting (car bmk)))))
 
 (defun bmkp-gt-auto-update--tick (&optional only-buffer)
   "Refresh auto-update bookmarks whose file is currently visited.

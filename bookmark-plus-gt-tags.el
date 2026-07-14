@@ -223,7 +223,13 @@ column is on; otherwise falls back to the upstream defcustom."
 For each row, calls FORMAT-FN with the bookmark record and inserts
 its result padded to the column start.  FACE is applied to the
 inserted text.  Empty strings from FORMAT-FN insert only the
-padding."
+padding.
+
+Padding inserted by `move-to-column ... t' inherits text
+properties (including `face') from the preceding character.
+Bookmark+'s row-level type face (e.g. `bmkp-url', `bmkp-file')
+therefore bleeds across the tags column when the row is padded.
+Strip `face' from the padding to prevent that."
   (save-excursion
     (goto-char (point-min))
     (forward-line bmkp-bmenu-header-lines)
@@ -231,9 +237,21 @@ padding."
       (while (< (point) (point-max))
         (let ((name  (bookmark-bmenu-bookmark)))
           (when name
-            (let* ((bmk  (bmkp-get-bookmark name 'NOERROR))
-                   (str  (and bmk (funcall format-fn bmk))))
+            (let* ((bmk         (bmkp-get-bookmark name 'NOERROR))
+                   (str         (and bmk (funcall format-fn bmk)))
+                   ;; Snapshot line end BEFORE `move-to-column' so we
+                   ;; can tell whether it inserted padding.  If the row
+                   ;; was already at least START-COL wide, no insert
+                   ;; happens and we must not touch existing faces.
+                   (row-end     (line-end-position)))
               (move-to-column start-col t)
+              (when (> (line-end-position) row-end)
+                ;; Padding was inserted at ROW-END..point.  It
+                ;; inherited the preceding character's `face' via
+                ;; `insert' stickiness — strip so Bookmark+'s row-type
+                ;; face (e.g. `bmkp-url') does not bleed across the
+                ;; empty tags column.
+                (put-text-property row-end (point) 'face nil))
               (when (and str (not (string-empty-p str)))
                 (insert (propertize str 'face face))))))
         (forward-line 1)))))

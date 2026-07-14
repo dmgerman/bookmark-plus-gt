@@ -47,6 +47,14 @@
 
 (declare-function bmkp-default-bookmark-name       "bookmark+-1")
 (declare-function bmkp-this-file/buffer-alist-only "bookmark+-1")
+(declare-function bmkp-this-buffer-p               "bookmark+-1")
+(declare-function bmkp-same-file-p                 "bookmark+-1")
+(declare-function bookmark--set-fringe-mark        "bookmark")
+(declare-function bmkp-lighted-p                   "bookmark+-lit")
+(declare-function bmkp-unlight-bookmark            "bookmark+-lit")
+(declare-function bmkp-light-bookmark              "bookmark+-lit")
+
+(defvar bookmark-set-fringe-mark)      ; In `bookmark' (Emacs 28+).
 
 (defvar pdf-view--bookmark-to-restore) ; In `pdf-view' (pdf-tools).
 
@@ -172,6 +180,48 @@ cannot clobber the outer call's value."
 
 ;;; General commands (always loaded) ------------------------------------
 
+(defun bmkp-gt--refresh-bookmark-fringe (bookmark buffer old-pos)
+  "In BUFFER, refresh the built-in fringe mark for BOOKMARK.
+Removes any `category'-`bookmark' overlay at OLD-POS's line,
+then places a fresh one at BOOKMARK's current stored `position'.
+Silent no-op when `bookmark-set-fringe-mark' is nil or BUFFER
+is not live.
+
+Used by both `bmkp-gt-relocate-here' and the auto-update tick so
+their fringe-update semantics stay identical."
+  (when (and (boundp 'bookmark-set-fringe-mark)
+             bookmark-set-fringe-mark
+             (fboundp 'bookmark--set-fringe-mark)
+             (buffer-live-p buffer))
+    (with-current-buffer buffer
+      ;; Remove the old overlay via explicit OLD-POS rather than
+      ;; `bookmark--remove-fringe-mark' — the latter uses the
+      ;; bookmark's *current* stored position, which we've already
+      ;; updated, so it would miss the old overlay.
+      (when old-pos
+        (save-excursion
+          (goto-char (min old-pos (point-max)))
+          (dolist (o (overlays-in (pos-bol) (1+ (pos-bol))))
+            (when (eq 'bookmark (overlay-get o 'category))
+              (delete-overlay o)))))
+      (let ((pos (bookmark-prop-get bookmark 'position)))
+        (when pos
+          (save-excursion
+            (goto-char (min pos (point-max)))
+            (bookmark--set-fringe-mark)))))))
+
+(defun bmkp-gt--refresh-bookmark-lighting (bookmark)
+  "Move BOOKMARK's `bookmark+-lit' overlay to the current stored position.
+No-op when the bookmark was not lit — we do not force-light
+bookmarks the user chose to leave unlit.  Bookmark identity is
+carried on the overlay, so unlight+relight after a position
+change works without knowing the old position."
+  (when (and (fboundp 'bmkp-lighted-p)
+             (bmkp-lighted-p bookmark))
+    (bmkp-unlight-bookmark bookmark 'NOERRORP)
+    (bmkp-light-bookmark bookmark)))
+
+
 ;;;###autoload
 (defun bmkp-gt-relocate-here (bookmark &optional set-auto-update)
   "Point BOOKMARK at the current buffer's location.
@@ -194,7 +244,9 @@ tracking is enabled (see `bmkp-gt-auto-update-mode')."
    (list (bookmark-completing-read "Relocate bookmark"
                                    (bmkp-default-bookmark-name))
          current-prefix-arg))
-  (let* ((raw
+  (let* ((buffer  (current-buffer))
+         (old-pos (bookmark-prop-get bookmark 'position))
+         (raw
           ;; pdf-view's recorder short-circuits to the cached
           ;; bookmark when `pdf-view--bookmark-to-restore' is set.
           ;; Force a fresh snapshot by let-binding it to nil.
@@ -212,10 +264,36 @@ tracking is enabled (see `bmkp-gt-auto-update-mode')."
     (when pos (bookmark-prop-set bookmark 'end-position pos))
     (when set-auto-update
       (bookmark-prop-set bookmark 'auto-update t))
+    (bmkp-gt--refresh-bookmark-fringe   bookmark buffer old-pos)
+    (bmkp-gt--refresh-bookmark-lighting bookmark)
     (when (called-interactively-p 'interactive)
       (message "Relocated `%s'%s." bookmark
                (if set-auto-update " (auto-update ON)" "")))))
 
+
+(defun bmkp-gt--this-location-alist-only ()
+  "Return `bookmark-alist' filtered to bookmarks pointing at this buffer.
+Like `bmkp-this-file/buffer-alist-only', except any handler
+qualifies: any bookmark whose `filename' resolves to the current
+buffer's file counts.  Upstream's `bmkp-this-file-p' delegates to
+`bmkp-file-bookmark-p', which excludes handler-specific bookmarks
+(e.g. `org-bookmark-heading-jump', `pdf-view-bookmark-jump-handler')
+even when their `filename' matches the visited file exactly.
+
+Falls back to `bmkp-this-buffer-p' when the current buffer has
+no file (magit, gnus, ...)."
+  (bookmark-maybe-load-default-file)
+  (let ((this-file (or (buffer-file-name)
+                       (and (eq major-mode 'dired-mode)
+                            (if (consp dired-directory)
+                                (car dired-directory)
+                              dired-directory)))))
+    (if this-file
+        (seq-filter (lambda (bm)
+                      (let ((bf (bookmark-get-filename bm)))
+                        (and bf (bmkp-same-file-p this-file bf))))
+                    bookmark-alist)
+      (seq-filter #'bmkp-this-buffer-p bookmark-alist))))
 
 ;;;###autoload
 (defun bmkp-gt-relocate-this-file-here (bookmark &optional set-auto-update)
@@ -230,7 +308,7 @@ With a prefix argument (non-nil SET-AUTO-UPDATE), also set the
 
 Signals an error when no bookmark points at this file/buffer."
   (interactive
-   (let ((candidates (bmkp-this-file/buffer-alist-only)))
+   (let ((candidates (bmkp-gt--this-location-alist-only)))
      (cond
       ((null candidates)
        (user-error "No bookmarks point at this file/buffer"))

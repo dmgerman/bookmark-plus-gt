@@ -186,6 +186,27 @@ not visiting a file or directory' in non-file buffers."
                 (bookmark-prop-get "mode-target" 'handler)))))
 
 
+(ert-deftest bmkp-gt-test-relocate/moves-fringe-mark ()
+  "Relocation moves the built-in fringe overlay to the new position."
+  (let ((bookmark-set-fringe-mark 'bookmark-mark))
+    (bmkp-gt-test-with-clean-bookmarks
+      (bmkp-gt-test-with-fixture-buffer buf "aaa\nbbb\nccc\n"
+        (bmkp-gt-test--make-bookmark "movef-rel" buf 1)
+        ;; Move point past the first line and relocate.
+        (with-current-buffer buf
+          (goto-char 5)  ; inside "bbb"
+          (bmkp-gt-relocate-here "movef-rel"))
+        (let ((positions
+               (with-current-buffer buf
+                 (sort (mapcar #'overlay-start
+                               (seq-filter
+                                (lambda (o) (eq 'bookmark (overlay-get o 'category)))
+                                (overlays-in (point-min) (point-max))))
+                       #'<))))
+          (should (= 1 (length positions)))
+          (should (= 5 (car positions))))))))
+
+
 ;;; bmkp-gt-relocate-this-file-here ------------------------------------
 
 (ert-deftest bmkp-gt-test-relocate-this-file/single-match-updates-fields ()
@@ -199,6 +220,29 @@ not visiting a file or directory' in non-file buffers."
         (with-current-buffer buf
           (bmkp-gt-relocate-this-file-here "only"))
         (should (= end (bookmark-prop-get "only" 'position)))))))
+
+(ert-deftest bmkp-gt-test-relocate-this-file/handler-specific-bookmark-qualifies ()
+  "Bookmarks with mode-specific handlers (e.g. `org-bookmark-heading-jump')
+whose `filename' resolves to the current buffer's file are visible to
+`bmkp-gt-relocate-this-file-here'.  Regression: upstream's
+`bmkp-this-file-p' filters them out via `bmkp-file-bookmark-p'."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "hello\n"
+      (bmkp-gt-test--make-bookmark "org-heading-like" buf 1)
+      ;; Give it a handler upstream's `bmkp-file-bookmark-p' rejects.
+      (bookmark-prop-set "org-heading-like" 'handler
+                         'org-bookmark-heading-jump)
+      (with-current-buffer buf
+        ;; Should be found by the scoped predicate — no error.
+        (let ((matches (bmkp-gt--this-location-alist-only)))
+          (should (assoc "org-heading-like" matches)))
+        ;; End-to-end: the command auto-selects it (single match)
+        ;; and relocates.  Would signal `user-error' with upstream's
+        ;; filter.
+        (goto-char (point-max))
+        (bmkp-gt-relocate-this-file-here "org-heading-like")
+        (should (= (point-max)
+                   (bookmark-prop-get "org-heading-like" 'position)))))))
 
 (ert-deftest bmkp-gt-test-relocate-this-file/errors-when-no-match ()
   "No bookmarks for the current buffer: user-error, no state change."

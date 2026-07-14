@@ -244,5 +244,34 @@
         (kill-buffer "*Help*")))))
 
 
+(ert-deftest bmkp-gt-test-tags/padding-does-not-inherit-row-face ()
+  "Padding inserted between the name column and the tags/type column
+must not inherit the row's Bookmark+ type face (`bmkp-local-file-*',
+`bmkp-url', ...).  Regression: the type face leaked across the empty
+tags column via `move-to-column ... t' inheritance."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "row-plain" buf))
+    (let ((bmkp-gt-bmenu-show-tags-flag  t)
+          (bmkp-gt-bmenu-show-type-flag  t))
+      (unwind-protect
+          (progn
+            (bookmark-bmenu-list)
+            (with-current-buffer bmkp-bmenu-buffer
+              (save-excursion
+                (goto-char (point-min))
+                (search-forward "row-plain")
+                (forward-line 0)
+                ;; Advance well past the name into the padding /
+                ;; tags-column area; assert no `bmkp-*' face there.
+                (forward-char 40)
+                (let ((f (get-text-property (point) 'face)))
+                  (should-not
+                   (and (symbolp f)
+                        (string-prefix-p "bmkp-" (symbol-name f))))))))
+        (when (get-buffer bmkp-bmenu-buffer)
+          (kill-buffer bmkp-bmenu-buffer))))))
+
+
 (provide 'bmkp-gt-test-tags)
 ;;; bmkp-gt-test-tags.el ends here
