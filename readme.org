@@ -16,6 +16,11 @@ Bookmark+ itself is not modified.
   :load-path "~/.emacs.d/modules/bookmark-plus-gt"
   :straight nil
   :after bookmark+)
+
+(use-package bookmark-plus-gt-auto-update
+  :load-path "~/.emacs.d/modules/bookmark-plus-gt"
+  :straight nil
+  :after bookmark+)
 #+end_src
 
 * Commands
@@ -38,6 +43,18 @@ Bookmark+ itself is not modified.
 
 - =bmkp-gt-bmenu-toggle-type= — show/hide the type column in
   =*Bookmark List*=.  Bound to =@=.
+
+- =bmkp-gt-auto-update-toggle= / =bmkp-gt-auto-update-bmenu-toggle= —
+  flip the =auto-update= property on a bookmark.  The bmenu variant
+  reads the bookmark at point and is bound to =^= in =*Bookmark List*=.
+
+- =bmkp-gt-auto-update-mode= — global minor mode; when on, refreshes
+  every auto-update bookmark's position from the buffer visiting its
+  file (idle timer + on kill-buffer + on window-state-change).
+  Auto-enables at load time unless
+  =bmkp-gt-auto-update-enable-flag= is nil.
+
+- =bmkp-gt-auto-update-now= — force one refresh pass immediately.
 
 * Minibuffer filtering (=bmkp-gt-jump=)
 
@@ -77,6 +94,41 @@ The type label comes from =bmkp-gt-jump-narrow= (same source as the
 consult minibuffer), so =@File=, =@Dired=, =@Web=, etc. mean the same
 thing everywhere.
 
+* Auto-update bookmarks
+
+A bookmark carrying the =auto-update= property is a *reading-position
+tracker*.  While =bmkp-gt-auto-update-mode= is on, three triggers
+refresh the bookmark's =position= (and context strings) to the
+current point of the buffer visiting its file:
+
+- an idle timer firing every =bmkp-gt-auto-update-interval= seconds;
+- =kill-buffer-hook= (catches closing the file);
+- =window-state-change-hook= (catches switching away).
+
+Bookmarks without the property are not touched.  Files whose buffer
+is not currently visited are not touched either.  =end-position= is
+pinned to =position= on each refresh so upstream's region-restore
+path (which errors on region-less bookmarks under =bmkp-use-region=)
+is never taken for an auto-update bookmark.
+
+Display: =*Bookmark List*= renders a fifth marks column with =^= on
+each auto-update bookmark, using face =bmkp-gt-auto-update-mark= while
+the mode is on and =bmkp-gt-auto-update-mark-inactive= (inverse-video)
+while it is off — so a set property with no active tracking is
+visually flagged.
+
+Keys and commands: =^= in =*Bookmark List*= toggles the property on
+the bookmark at point (see =bmkp-gt-auto-update-bmenu-toggle=); from
+anywhere, =M-x bmkp-gt-auto-update-toggle=.  =M-x
+bmkp-gt-auto-update-mode= turns tracking on/off globally; =M-x
+bmkp-gt-auto-update-now= forces one refresh pass.  Press =?= in the
+list buffer to see the =^= entry in the marks legend, including a
+live status of whether the mode is on or off.
+
+The toggle does not itself call =bookmark-save= (matches
+=bmkp-toggle-temporary-bookmark=); the property change is tracked in
+=bmkp-modified-bookmarks= and persists on the next Bookmark+ save.
+
 * Annotations
 
 When marginalia is loaded, =bmkp-gt-bookmark-annotation= registers on
@@ -109,6 +161,8 @@ bookmark name.
 | =bmkp-gt-bmenu-tags-max-width=           | Cap on the tags column width (default =40=).  |
 | =bmkp-gt-bmenu-type-max-width=           | Cap on the type column width (default =20=).  |
 | =bmkp-gt-bmenu-column-gap=               | Space between adjacent columns (default =2=). |
+| =bmkp-gt-auto-update-enable-flag=        | Auto-enable the tracking mode at load (default =t=). |
+| =bmkp-gt-auto-update-interval=           | Idle seconds between refresh ticks (default =60=). |
 
 Customize group: =bookmark-plus-gt=.
 
