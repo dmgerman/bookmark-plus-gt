@@ -209,6 +209,28 @@ labels (so what you see matches what =@= filters).  Non-file
 bookmarks show their =location= URL instead of the =- no file -=
 placeholder.
 
+* State persistence
+
+Bookmark+ persists a couple of internal state variables (currently
+=bmkp-last-as-first-bookmark-file=) via =customize-save-variable=,
+which routes through Emacs's =custom-file=.  Users with
+=custom-file= set to =/dev/null= (or any unwritable path) as a
+"config-is-code, no Customize crumbs" gesture hit a =file-error=
+every time upstream tries to persist, which aborts the enclosing
+=bookmark-save= and cascades into visible bugs such as the bookmark
+list failing to refresh after =T +=.
+
+Bookmark-plus-gt intercepts =customize-save-variable= for a fixed
+allowlist of symbols and routes their persistence to a dedicated
+file, =bmkp-gt-state-file= (default
+=~/.emacs.d/bookmark-plus-gt-state.el=).  All other symbols pass
+through to Emacs's normal Customize machinery unchanged.
+
+The allowlist is =bmkp-gt--persisted-vars= — currently just
+=bmkp-last-as-first-bookmark-file=.  Extend by =add-to-list=.  The
+state file is auto-generated (a sequence of =setq= forms); safe to
+delete — it will be rewritten on next persist.
+
 * Preview errors
 
 Preview attempts (both paths) run under =condition-case=.  Failure
@@ -235,6 +257,7 @@ bookmark name.
 | =bmkp-gt-bmenu-column-gap=               | Space between adjacent columns (default =2=). |
 | =bmkp-gt-auto-update-enable-flag=        | Auto-enable the tracking mode at load (default =t=). |
 | =bmkp-gt-auto-update-interval=           | Idle seconds between refresh ticks (default =60=). |
+| =bmkp-gt-state-file=                     | Where the state-file intercept persists (default =~/.emacs.d/bookmark-plus-gt-state.el=). |
 
 Customize group: =bookmark-plus-gt=.
 

@@ -178,6 +178,77 @@ cannot clobber the outer call's value."
 (advice-add 'bookmark--jump-via :around #'bmkp-gt-jump-display--jump-via-advice)
 
 
+;;; Persistence backend for bookmark-plus runtime state (always-on) -----
+;;
+;; Bookmark-plus persists `bmkp-last-as-first-bookmark-file' (its
+;; "last bookmark file used" memory) via `customize-save-variable',
+;; which routes through Emacs's `custom-file'.  Users who point
+;; `custom-file' at /dev/null (or any unwritable path) as a
+;; "config-is-code, no Customize crumbs" gesture hit a `file-error'
+;; every time bookmark-plus tries to persist — the error aborts
+;; `bookmark-save', which in turn breaks anything downstream that
+;; expected the save to complete (e.g. `bmkp-add-tags' never reaches
+;; its `bmkp-refresh/rebuild-menu-list' call, so the list buffer
+;; silently fails to autorefresh after `T +').  See
+;; `ai/littering.org' for the full analysis.
+;;
+;; This layer intercepts `customize-save-variable' for a fixed
+;; allowlist of symbols and persists them to a dedicated state file
+;; (`bmkp-gt-state-file') instead.  All other symbols pass through
+;; to Emacs's normal Customize machinery.  On load, the state file
+;; is read once to restore any persisted values.
+
+(defcustom bmkp-gt-state-file
+  (locate-user-emacs-file "bookmark-plus-gt-state.el")
+  "File where bookmark-plus-gt persists intercepted state variables.
+See `bmkp-gt--persisted-vars' for the list of variables routed to
+this file instead of `custom-file'.  Format is a self-contained
+Emacs Lisp file — a series of `setq' forms, loadable with `load'."
+  :type 'file
+  :group 'bookmark-plus-gt)
+
+(defvar bmkp-gt--persisted-vars
+  '(bmkp-last-as-first-bookmark-file)
+  "Symbols intercepted from `customize-save-variable' and persisted
+via `bmkp-gt-state-file'.  See `bmkp-gt-state-file' commentary for
+the rationale.")
+
+(defun bmkp-gt--write-state ()
+  "Serialize each var in `bmkp-gt--persisted-vars' to `bmkp-gt-state-file'.
+Only bound vars are written; unbound ones are skipped silently."
+  (let ((file bmkp-gt-state-file))
+    (with-temp-file file
+      (insert ";; -*- lexical-binding: t -*-\n")
+      (insert ";; bookmark-plus-gt persisted state.  Auto-generated; do not edit.\n")
+      (insert ";; See `bmkp-gt-state-file' and `bmkp-gt--persisted-vars'.\n\n")
+      (dolist (sym bmkp-gt--persisted-vars)
+        (when (boundp sym)
+          (insert (format "(setq %s %S)\n" sym (symbol-value sym))))))))
+
+(defun bmkp-gt-load-state ()
+  "Restore persisted state from `bmkp-gt-state-file'.
+Called at load time; safe to call again to re-load the file.  If
+the file does not exist yet, no state has been persisted — silent
+no-op."
+  (when (file-readable-p bmkp-gt-state-file)
+    (load bmkp-gt-state-file nil 'nomessage)))
+
+(define-advice customize-save-variable
+    (:around (orig sym val &optional comment) bmkp-gt-intercept-persistence)
+  "Route persistence of `bmkp-gt--persisted-vars' to `bmkp-gt-state-file'.
+For every other symbol, delegate to the original
+`customize-save-variable'.  Runtime binding still advances via
+`customize-set-variable' so the intercepted var behaves normally
+in memory; only the file-write path is redirected."
+  (if (memq sym bmkp-gt--persisted-vars)
+      (progn (customize-set-variable sym val comment)
+             (bmkp-gt--write-state))
+    (funcall orig sym val comment)))
+
+;; Restore persisted state now that the advice and file paths are set.
+(bmkp-gt-load-state)
+
+
 ;;; General commands (always loaded) ------------------------------------
 
 (defun bmkp-gt--refresh-bookmark-fringe (bookmark buffer old-pos)

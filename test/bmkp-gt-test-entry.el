@@ -253,5 +253,65 @@ whose `filename' resolves to the current buffer's file are visible to
                       :type 'user-error)))))
 
 
+;;; State-file persistence backend --------------------------------------
+
+(defmacro bmkp-gt-test-state--with-scratch-state-file (var &rest body)
+  "Bind VAR to a fresh state-file path (not yet created); run BODY.
+Cleans up the file if BODY (or the advice) created it."
+  (declare (indent 1) (debug t))
+  `(let ((,var (make-temp-name
+                (expand-file-name "bmkp-gt-state-"
+                                  temporary-file-directory))))
+     (unwind-protect (progn ,@body)
+       (when (file-exists-p ,var) (delete-file ,var)))))
+
+(ert-deftest bmkp-gt-test-state/intercepted-symbol-writes-to-state-file ()
+  "Intercepted symbols route to `bmkp-gt-state-file', bypassing `custom-file'."
+  (bmkp-gt-test-state--with-scratch-state-file state-file
+    (let ((bmkp-gt-state-file state-file)
+          (bmkp-gt--persisted-vars '(bmkp-gt-test--fake-var))
+          (custom-save-called nil))
+      (cl-letf (((symbol-function 'custom-save-all)
+                 (lambda () (setq custom-save-called t))))
+        (customize-save-variable 'bmkp-gt-test--fake-var 42))
+      (should-not custom-save-called)
+      (should (file-readable-p state-file))
+      (with-temp-buffer
+        (insert-file-contents state-file)
+        (should (string-match-p "bmkp-gt-test--fake-var 42" (buffer-string)))))))
+
+(ert-deftest bmkp-gt-test-state/non-intercepted-does-not-write-state-file ()
+  "For a symbol not in `bmkp-gt--persisted-vars', the advice must not
+touch `bmkp-gt-state-file' — it delegates to the original."
+  (bmkp-gt-test-state--with-scratch-state-file state-file
+    (let ((bmkp-gt-state-file state-file)
+          (bmkp-gt--persisted-vars '()))
+      ;; Stub the original so we don't actually mutate `custom-file'.
+      (cl-letf* ((orig (advice--cd*r (symbol-function 'customize-save-variable)))
+                 ((symbol-function 'customize-save-variable-original)
+                  (lambda (&rest _) nil)))
+        ;; Call the advised form; since our allowlist is empty, the
+        ;; advice must fall through to ORIG.  We don't assert what
+        ;; ORIG does — only that our state file is untouched.
+        (ignore-errors
+          (customize-save-variable 'bmkp-gt-test--other-var 99)))
+      (should-not (file-exists-p state-file)))))
+
+(ert-deftest bmkp-gt-test-state/roundtrip-write-then-load ()
+  "State written via the advice is restored by `bmkp-gt-load-state'."
+  (bmkp-gt-test-state--with-scratch-state-file state-file
+    (let ((bmkp-gt-state-file state-file)
+          (bmkp-gt--persisted-vars '(bmkp-gt-test--roundtrip-var)))
+      (cl-letf (((symbol-function 'custom-save-all) #'ignore))
+        (customize-save-variable 'bmkp-gt-test--roundtrip-var "sentinel-value"))
+      ;; Simulate a restart: unbind the var, then load.
+      (when (boundp 'bmkp-gt-test--roundtrip-var)
+        (makunbound 'bmkp-gt-test--roundtrip-var))
+      (bmkp-gt-load-state)
+      (should (equal "sentinel-value"
+                     (and (boundp 'bmkp-gt-test--roundtrip-var)
+                          (symbol-value 'bmkp-gt-test--roundtrip-var)))))))
+
+
 (provide 'bmkp-gt-test-entry)
 ;;; bmkp-gt-test-entry.el ends here
