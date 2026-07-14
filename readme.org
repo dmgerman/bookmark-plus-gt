@@ -7,20 +7,21 @@ Bookmark+ itself is not modified.
 * Install
 
 #+begin_src emacs-lisp
-(use-package bookmark-plus-gt-preview
+(use-package bookmark-plus-gt
   :load-path "~/.emacs.d/modules/bookmark-plus-gt"
   :straight nil
   :after bookmark+)
+#+end_src
 
-(use-package bookmark-plus-gt-tags
-  :load-path "~/.emacs.d/modules/bookmark-plus-gt"
-  :straight nil
-  :after bookmark+)
+The umbrella loads every feature by default.  To load only a subset,
+set =bmkp-gt-features= in =:init= (it must be set before the require):
 
-(use-package bookmark-plus-gt-auto-update
+#+begin_src emacs-lisp
+(use-package bookmark-plus-gt
   :load-path "~/.emacs.d/modules/bookmark-plus-gt"
   :straight nil
-  :after bookmark+)
+  :after bookmark+
+  :init (setq bmkp-gt-features '(preview tags)))  ; skip auto-update
 #+end_src
 
 * Commands
@@ -149,6 +150,7 @@ bookmark name.
 
 | Option                                   | Purpose                                     |
 |------------------------------------------+---------------------------------------------|
+| =bmkp-gt-features=                       | Feature files loaded by the umbrella (default: all). |
 | =bmkp-gt-preview-use-consult-flag=       | Toggle the consult reader (default =t=).    |
 | =bmkp-gt-jump-narrow=                    | Handler → group mapping (label + narrow key). |
 | =bmkp-gt-jump-group-by=                  | =nil= / =type= / =tag=.                     |
