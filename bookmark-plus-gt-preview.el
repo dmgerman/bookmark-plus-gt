@@ -230,8 +230,9 @@ Affects only the `consult'-backed `bmkp-gt-jump' completion path."
 (defcustom bmkp-gt-jump-sort-by 'mru
   "How `bmkp-gt-jump' sorts completion candidates.
 
-  `mru'    Most recently modified first (uses each bookmark's
-           `last-modified' property, when present).
+  `mru'    Most recently visited first (uses each bookmark's
+           `last-visited' property, set by `bmkp-record-visit'
+           on every jump).
   `visits' Most-jumped first (uses each bookmark's `visits' count).
   `alpha'  Alphabetical by bookmark name.
 
@@ -465,8 +466,8 @@ NARROW is the (CHAR . NAME) alist used by `consult--type-group'."
     ('mru
      (sort cands (lambda (a b)
                    (time-less-p
-                    (or (bookmark-prop-get (bmkp-gt--candidate-name b) 'last-modified) '(0 0))
-                    (or (bookmark-prop-get (bmkp-gt--candidate-name a) 'last-modified) '(0 0))))))
+                    (or (bookmark-prop-get (bmkp-gt--candidate-name b) 'last-visited) '(0 0))
+                    (or (bookmark-prop-get (bmkp-gt--candidate-name a) 'last-visited) '(0 0))))))
     ('visits
      (sort cands (lambda (a b)
                    (> (or (bookmark-prop-get (bmkp-gt--candidate-name a) 'visits) 0)

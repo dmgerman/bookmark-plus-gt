@@ -109,6 +109,26 @@ Facet keys inside the minibuffer:
 Type narrowing uses =consult-narrow-key=; e.g. with it set to ="C-+"=,
 =C-+ d= narrows to Dired.  Without it: =M-x consult-narrow=.
 
+** Sorting and grouping candidates
+
+Two defcustoms control candidate order in the =bmkp-gt-jump= reader:
+
+- =bmkp-gt-jump-sort-by= (default =mru=):
+  - =mru= — most recently visited first, from each bookmark's
+    =last-visited= property (updated by Bookmark+'s
+    =bmkp-record-visit= on every jump).
+  - =visits= — highest =visits= counter first.
+  - =alpha= — alphabetical by bookmark name.
+
+- =bmkp-gt-jump-group-by= (default =nil=):
+  - =nil= — no grouping.
+  - =type= — group by handler-type (=@File=, =@Dired=, …).
+  - =tag= — group by primary tag.
+
+  When grouping is on, the sort applies within each group; groups
+  themselves appear in first-seen order, so the group holding the
+  best-sorting candidate leads.
+
 * =*Bookmark List*= columns
 
 With =bookmark-plus-gt-tags= loaded, the list buffer renders two
