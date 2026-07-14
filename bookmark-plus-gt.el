@@ -1,4 +1,4 @@
-;;; bookmark-plus-gt.el --- Umbrella for bookmark-plus-gt features   -*- lexical-binding:t -*-
+;;; bookmark-plus-gt.el --- Entry point for bookmark-plus-gt features   -*- lexical-binding:t -*-
 ;;
 ;; Filename:    bookmark-plus-gt.el
 ;; Description: Loads the bookmark-plus-gt feature files selected by
@@ -29,7 +29,7 @@
 ;;
 ;; Which feature files load is controlled by `bmkp-gt-features',
 ;; a list of symbols (default: all features on).  Set it before
-;; the umbrella is required — from `use-package :init':
+;; the entry point is required — from `use-package :init':
 ;;
 ;;   (use-package bookmark-plus-gt
 ;;     :init (setq bmkp-gt-features '(preview tags))  ; skip auto-update
@@ -37,8 +37,8 @@
 ;;
 ;; The auto-update feature has an additional per-file toggle
 ;; (`bmkp-gt-auto-update-enable-flag') for controlling whether the
-;; mode auto-enables *after* the file is loaded.  The umbrella flag
-;; controls whether the file is loaded at all.
+;; mode auto-enables *after* the file is loaded.  The entry-point
+;; flag controls whether the file is loaded at all.
 
 ;;; Code:
 
@@ -55,7 +55,7 @@
   "Feature files loaded by `bookmark-plus-gt'.
 Each symbol NAME triggers a `require' of `bookmark-plus-gt-NAME'.
 
-Set this before the umbrella is required — for example, in a
+Set this before the entry point is required — for example, in a
 `use-package :init' block — otherwise the require happens with
 the default (all features on)."
   :type '(set (const :tag "Preview / consult jump reader" preview)

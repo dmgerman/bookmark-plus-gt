@@ -1,4 +1,4 @@
-;;; bmkp-gt-test-umbrella.el --- Tests for umbrella-level commands   -*- lexical-binding: t -*-
+;;; bmkp-gt-test-entry.el --- Tests for entry-point commands   -*- lexical-binding: t -*-
 
 ;;; Code:
 
@@ -90,7 +90,7 @@
 ;; end-to-end via `bookmark-jump'.
 
 (ert-deftest bmkp-gt-test-jd/advice-installed ()
-  "The jump-via advice is installed by loading the umbrella."
+  "The jump-via advice is installed by loading the entry point."
   (should (advice-member-p 'bmkp-gt-jump-display--jump-via-advice
                            'bookmark--jump-via)))
 
@@ -152,5 +152,5 @@
           (should (eq 'sentinel-outer bmkp-jump-display-function)))))))
 
 
-(provide 'bmkp-gt-test-umbrella)
-;;; bmkp-gt-test-umbrella.el ends here
+(provide 'bmkp-gt-test-entry)
+;;; bmkp-gt-test-entry.el ends here

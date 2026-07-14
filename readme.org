@@ -13,8 +13,9 @@ Bookmark+ itself is not modified.
   :after bookmark+)
 #+end_src
 
-The umbrella loads every feature by default.  To load only a subset,
-set =bmkp-gt-features= in =:init= (it must be set before the require):
+The entry point loads every feature by default.  To load only a
+subset, set =bmkp-gt-features= in =:init= (it must be set before the
+require):
 
 #+begin_src emacs-lisp
 (use-package bookmark-plus-gt
@@ -23,6 +24,26 @@ set =bmkp-gt-features= in =:init= (it must be set before the require):
   :after bookmark+
   :init (setq bmkp-gt-features '(preview tags)))  ; skip auto-update
 #+end_src
+
+Feature symbols:
+
+- =preview= — the =consult=-backed jump reader
+  (=bmkp-gt-jump= and its variants) plus =bmkp-gt-list-preview-mode=
+  for =*Bookmark List*=.  See "Minibuffer filtering" and
+  "Annotations" below.
+- =tags= — extra columns in =*Bookmark List*= between the name and
+  the filename: a tags column (=;=) and a type column (=@=).  See
+  "*Bookmark List* columns" below.
+- =auto-update= — the reading-position tracker: bookmarks carrying
+  the =auto-update= property have their location refreshed as the
+  file is read.  See "Auto-update bookmarks" below.
+
+Two things are always on regardless of =bmkp-gt-features=, because
+they are not features you can meaningfully opt out of:
+
+- The =bmkp-gt-relocate-here= command (see "Commands" below).
+- The =bookmark--jump-via= advice that ensures custom-handler jumps
+  actually display their destination (a bookmark-plus bug fix).
 
 * Commands
 
@@ -63,7 +84,7 @@ set =bmkp-gt-features= in =:init= (it must be set before the require):
   (filename, buffer-name, position, context strings, end-position)
   are rewritten.  With a prefix argument (=C-u=), also sets the
   =auto-update= property on the bookmark so future ticks track it.
-  Defined in the umbrella and always available, independent of
+  Defined in the entry point and always available, independent of
   =bmkp-gt-features=.
 
 * Minibuffer filtering (=bmkp-gt-jump=)
@@ -173,7 +194,7 @@ bookmark name.
 
 | Option                                   | Purpose                                     |
 |------------------------------------------+---------------------------------------------|
-| =bmkp-gt-features=                       | Feature files loaded by the umbrella (default: all). |
+| =bmkp-gt-features=                       | Feature files loaded by the entry point (default: all). |
 | =bmkp-gt-preview-use-consult-flag=       | Toggle the consult reader (default =t=).    |
 | =bmkp-gt-jump-narrow=                    | Handler → group mapping (label + narrow key). |
 | =bmkp-gt-jump-group-by=                  | =nil= / =type= / =tag=.                     |
