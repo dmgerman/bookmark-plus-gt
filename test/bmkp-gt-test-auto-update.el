@@ -54,6 +54,48 @@
         (bmkp-gt-auto-update--tick)
         (should (= end (bookmark-prop-get "trk" 'position)))))))
 
+(ert-deftest bmkp-gt-test-auto-update/refresh-copies-mode-specific-fields ()
+  "Refresh copies mode-specific fields (e.g. `page') from the buffer's
+own `bookmark-make-record-function' — not just text-mode fields."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "any content\n"
+      (bmkp-gt-test--make-bookmark "mode-mixed" buf 1)
+      (bookmark-prop-set "mode-mixed" 'auto-update t)
+      (with-current-buffer buf
+        ;; Simulate a mode (like pdf-view) that returns a (NAME . DATA)
+        ;; record with a mode-specific field (`page').
+        (setq-local bookmark-make-record-function
+                    (lambda ()
+                      (cons "buffer-name"
+                            `((filename . ,(buffer-file-name))
+                              (position . 1)
+                              (page . 7)
+                              (handler . my-fake-handler))))))
+      (bmkp-gt-auto-update--tick)
+      (should (= 7 (bookmark-prop-get "mode-mixed" 'page)))
+      (should (eq 'my-fake-handler (bookmark-prop-get "mode-mixed" 'handler))))))
+
+(ert-deftest bmkp-gt-test-auto-update/refresh-preserves-identity-fields ()
+  "Refresh does not touch id, tags, annotation, auto-update, created, visits."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "content\n"
+      (bmkp-gt-test--make-bookmark "keeper" buf 1)
+      (bmkp-add-tags "keeper" '("kept") 'NO-UPDATE-P)
+      (bookmark-prop-set "keeper" 'annotation "note")
+      (bookmark-prop-set "keeper" 'auto-update t)
+      (let ((orig-id      (bookmark-prop-get "keeper" 'id))
+            (orig-created (bookmark-prop-get "keeper" 'created))
+            (orig-visits  (bookmark-prop-get "keeper" 'visits)))
+        (with-current-buffer buf (goto-char (point-max)))
+        (bmkp-gt-auto-update--tick)
+        (should (equal orig-id      (bookmark-prop-get "keeper" 'id)))
+        (should (equal orig-created (bookmark-prop-get "keeper" 'created)))
+        (should (equal orig-visits  (bookmark-prop-get "keeper" 'visits)))
+        (should (equal "note"       (bookmark-prop-get "keeper" 'annotation)))
+        (should (eq t               (bookmark-prop-get "keeper" 'auto-update)))
+        (should (member "kept" (mapcar (lambda (tg) (if (consp tg) (car tg) tg))
+                                       (bookmark-prop-get "keeper" 'tags))))))))
+
 (ert-deftest bmkp-gt-test-auto-update/tick-pins-end-position-to-position ()
   "`--tick' sets `end-position' equal to `position' so the region-restore path
 in `bmkp-handle-region-default' never fires on an auto-update bookmark."
@@ -159,6 +201,46 @@ in `bmkp-handle-region-default' never fires on an auto-update bookmark."
         (when (get-buffer bmkp-bmenu-buffer) (kill-buffer bmkp-bmenu-buffer))
         (when (get-buffer "*Help*") (kill-buffer "*Help*"))
         (bmkp-gt-auto-update-mode (if was-on 1 -1))))))
+
+
+;;; Describe-bookmark injection ---------------------------------------
+
+(ert-deftest bmkp-gt-test-auto-update/describe-adds-line-when-on ()
+  "`bmkp-bookmark-description' output gains an `Auto-update:' line
+just before `Tags:' when the bookmark carries the property."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "content\n"
+      (bmkp-gt-test--make-bookmark "annotated" buf 1)
+      (bmkp-add-tags "annotated" '("kept") 'NO-UPDATE-P)
+      (bookmark-prop-set "annotated" 'auto-update t)
+      (let ((desc (bmkp-bookmark-description "annotated")))
+        (should (string-match-p "Auto-update:\t\tyes" desc))
+        ;; Line ordering: Auto-update appears before Tags.
+        (should (< (string-match "Auto-update:" desc)
+                   (string-match "Tags:"        desc)))))))
+
+(ert-deftest bmkp-gt-test-auto-update/describe-omits-line-when-off ()
+  "`bmkp-bookmark-description' output does NOT contain the auto-update
+line when the property is absent."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "content\n"
+      (bmkp-gt-test--make-bookmark "plain" buf 1))
+    (let ((desc (bmkp-bookmark-description "plain")))
+      (should-not (string-match-p "Auto-update:" desc)))))
+
+(ert-deftest bmkp-gt-test-auto-update/describe-inject-line-fallbacks ()
+  "`--inject-line' falls back to `Annotation:' anchor, then appends."
+  ;; Anchor on Tags.
+  (should (string-match-p
+           "^Xs\nAuto-update:\tyes\nTags:"
+           (bmkp-gt-auto-update--inject-line "Xs\nTags:\n" "Auto-update:\tyes\n")))
+  ;; No Tags — anchor on Annotation.
+  (should (string-match-p
+           "^Xs\nAuto-update:\tyes\n\nAnnotation:"
+           (bmkp-gt-auto-update--inject-line "Xs\n\nAnnotation:\n" "Auto-update:\tyes\n")))
+  ;; Neither anchor — append.
+  (should (equal "Xs\nAuto-update:\tyes\n"
+                 (bmkp-gt-auto-update--inject-line "Xs\n" "Auto-update:\tyes\n"))))
 
 
 (ert-deftest bmkp-gt-test-auto-update/face-tracks-mode-state ()

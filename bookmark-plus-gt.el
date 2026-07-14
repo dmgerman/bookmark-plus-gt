@@ -67,6 +67,97 @@ the default (all features on)."
   (require (intern (format "bookmark-plus-gt-%s" feat))))
 
 
+;;; Bug 1 — Custom-handler jumps do not display (always-on) -------------
+;;
+;; Under `bookmark-plus', `bookmark--jump-via' deliberately does NOT
+;; call the caller's DISPLAY-FUNCTION after the handler returns — the
+;; handler is expected to consult `bmkp-jump-display-function' itself.
+;; Only the default handler path does that; every custom handler
+;; (PDF, EWW, Info, Gnus, Man, image, org, third-party) follows the
+;; vanilla contract (set-buffer, leave display to caller), so nothing
+;; visible happens.
+;;
+;; See `ai/plus-potential-bugs.org' entry "Bug 1" and
+;; `bookmark-x-1.el' (upstream reference).
+;;
+;; Design: explicit whitelist, no window-state observation.  Every
+;; handler in `bmkp-gt-jump-via-displays-itself' is trusted to arrange
+;; display; every other handler (including nil = default, and every
+;; third-party set-buffer handler) gets DISPLAY-FUNCTION called after
+;; the handler returns.
+;;
+;; We deliberately do NOT observe window state (as an earlier
+;; Approach C did) — window-state heuristics produced false positives:
+;; a prior split, a consult preview, or an unrelated hook could all
+;; make "the destination is already visible somewhere" fire when the
+;; handler had only set-buffer'd.  The whitelist is deterministic.
+;;
+;; Also `let'-binds `bmkp-jump-display-function' (via `unwind-protect'
+;; around a saved value) so nested jumps — e.g. `find-file-noselect'
+;; inside `bookmark-default-handler' running `find-file-hook' which
+;; calls back into the bookmark dispatch — cannot clobber the outer
+;; call's display function.
+;;
+;; Implementation is `:around' advice on `bookmark--jump-via' that
+;; uses `cl-letf' to intercept the single `bookmark-handle-bookmark'
+;; call inside it — not the function itself globally, because
+;; `bookmark-jump-noselect' and `bmkp-handle-region+narrow-indirect'
+;; also call it and must remain unaffected.
+
+(require 'cl-lib)
+
+(declare-function bmkp-get-bookmark "bookmark+-1")
+
+(defvar bmkp-jump-display-function)     ; In `bookmark+-1.el'.
+
+(defconst bmkp-gt-jump-via-displays-itself
+  '(nil
+    ;; Route through `bookmark-default-handler', which calls the
+    ;; display function via `bmkp-goto-position'.
+    bookmark-default-handler
+    ;; Delegate to `bookmark-default-handler' internally.
+    bmkp-jump-gnus bmkp-jump-woman bmkp-jump-man
+    ;; Have their own `display-buffer'/`pop-to-buffer' logic.
+    bmkp-jump-dired
+    bmkp-jump-bookmark-list bmkp-jump-bookmark-file
+    bmkp-jump-variable-list
+    ;; Non-window operations (browser, snippet kill-ring, sound, etc.).
+    bmkp-jump-w3m bmkp-jump-w3m-new-buffer bmkp-jump-w3m-only-one-buffer
+    bmkp-jump-url-browse
+    bmkp-jump-desktop
+    bmkp-jump-snippet bmkp-jump-sequence bmkp-jump-function
+    bmkp-sound-jump)
+  "Handlers that arrange their own display for `bookmark-jump'.
+For any handler not on this list, `bmkp-gt-jump-display--jump-via-advice'
+calls its DISPLAY-FUNCTION after the handler returns.")
+
+(defun bmkp-gt-jump-display--jump-via-advice (orig-fn bookmark &optional display-function)
+  "Around advice on `bookmark--jump-via'.
+If BOOKMARK's handler is not in `bmkp-gt-jump-via-displays-itself',
+call DISPLAY-FUNCTION on the destination after the handler runs.
+Also restores `bmkp-jump-display-function' on exit so nested jumps
+cannot clobber the outer call's value."
+  (let* ((bmk         (and bookmark (bmkp-get-bookmark bookmark 'NOERROR)))
+         (handler     (and bmk (or (bookmark-prop-get bmk 'file-handler)
+                                   (bookmark-get-handler bmk))))
+         (real-handle (symbol-function 'bookmark-handle-bookmark))
+         (prev-df     (and (boundp 'bmkp-jump-display-function)
+                           bmkp-jump-display-function)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'bookmark-handle-bookmark)
+                   (lambda (bm)
+                     (funcall real-handle bm)
+                     (when (and display-function
+                                (not (memq handler
+                                           bmkp-gt-jump-via-displays-itself)))
+                       (funcall display-function (current-buffer))))))
+          (funcall orig-fn bookmark display-function))
+      (when (boundp 'bmkp-jump-display-function)
+        (setq bmkp-jump-display-function prev-df)))))
+
+(advice-add 'bookmark--jump-via :around #'bmkp-gt-jump-display--jump-via-advice)
+
+
 ;;; General commands (always loaded) ------------------------------------
 
 ;;;###autoload

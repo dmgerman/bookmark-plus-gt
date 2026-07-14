@@ -59,6 +59,7 @@
 
 (declare-function bmkp-bmenu-list-1              "bookmark+-bmu")
 (declare-function bmkp-bmenu-mode-status-help    "bookmark+-bmu")
+(declare-function bmkp-bookmark-description      "bookmark+-1")
 (declare-function bmkp-refresh/rebuild-menu-list "bookmark+-1")
 (declare-function bmkp-same-file-p               "bookmark+-1")
 
@@ -66,6 +67,7 @@
 (defvar bmkp-bmenu-header-lines)    ; In `bookmark+-bmu'.
 (defvar bookmark-bmenu-mode-map)    ; In `bookmark+-bmu'.
 (defvar bmkp-gt-auto-update-mode)   ; Defined below by `define-minor-mode'.
+(defvar pdf-view--bookmark-to-restore) ; In `pdf-view' (pdf-tools).
 
 
 ;;; Customization -------------------------------------------------------
@@ -112,23 +114,48 @@ not currently running."
   "Return non-nil if bookmark record BMK has the `auto-update' property."
   (bookmark-prop-get (car bmk) 'auto-update))
 
+(defconst bmkp-gt-auto-update--preserve-fields
+  '(id tags annotation auto-update
+    created visits last-visited defaults)
+  "Fields that survive an auto-update refresh.
+Everything else in the fresh bookmark record replaces the
+bookmark's stored value.  This inverse-whitelist design means
+new bookmark types (text, PDF, Info, EWW, and any mode that
+provides its own `bookmark-make-record-function') update
+correctly without touching this list.")
+
 (defun bmkp-gt-auto-update--refresh (bmk buffer)
-  "Refresh BMK's location from BUFFER's current point.
-Updates position, front/rear context strings, and pins
-`end-position' to the same point so the bookmark reads as a
-point-not-a-region.  Otherwise, when `bmkp-use-region' is on,
-upstream's region-restore path fires and errors on bookmarks
-that never had a saved region (nil `front-context-region-string'
-passed to `string='.  Leaves name, tags, annotation, handler
-intact."
+  "Refresh BMK's location from BUFFER's current state.
+Calls BUFFER's `bookmark-make-record-function' so the update
+uses the mode-appropriate recorder.  Every field in the fresh
+record replaces the bookmark's value, except those in
+`bmkp-gt-auto-update--preserve-fields' (id, tags, annotation,
+auto-update, created, visits, last-visited, defaults).
+
+Pins `end-position' to `position' so upstream's region-restore
+path is not taken for the refreshed bookmark."
   (with-current-buffer buffer
-    (let* ((fresh (cdr (bookmark-make-record-default)))
-           (new-pos (alist-get 'position fresh)))
-      (dolist (field '(position front-context-string rear-context-string))
-        (let ((val (alist-get field fresh)))
-          (when val (bookmark-prop-set (car bmk) field val))))
-      (when new-pos
-        (bookmark-prop-set (car bmk) 'end-position new-pos)))))
+    (let* ((raw
+            ;; pdf-view's recorder short-circuits to the cached
+            ;; bookmark when `pdf-view--bookmark-to-restore' is set
+            ;; (a jump/restore is in progress).  Force a fresh
+            ;; snapshot by let-binding it to nil.  The `let' is a
+            ;; dynamic binding because the variable is `defvar'd
+            ;; in pdf-view.el.
+            (let ((pdf-view--bookmark-to-restore nil))
+              (funcall bookmark-make-record-function)))
+           ;; `bookmark-make-record-function' returns either a raw
+           ;; data alist (default text recorder) or a (NAME . DATA)
+           ;; pair (pdf-view, info, eww, gnus, etc.).  Normalize to
+           ;; data alist.
+           (fresh (if (stringp (car-safe raw)) (cdr raw) raw)))
+      (dolist (cell fresh)
+        (let ((field (car cell)))
+          (unless (memq field bmkp-gt-auto-update--preserve-fields)
+            (bookmark-prop-set (car bmk) field (cdr cell)))))
+      (let ((pos (bookmark-prop-get (car bmk) 'position)))
+        (when pos
+          (bookmark-prop-set (car bmk) 'end-position pos))))))
 
 (defun bmkp-gt-auto-update--tick (&optional only-buffer)
   "Refresh auto-update bookmarks whose file is currently visited.
@@ -305,6 +332,33 @@ whether `bmkp-gt-auto-update-mode' is currently on or off."
                 (insert "\n  " caret "  auto-update  (`^' to toggle)  " status)))))))))
 
 
+;;; `bmkp-describe-bookmark' enhancement -------------------------------
+
+(defun bmkp-gt-auto-update--inject-line (desc line)
+  "Return DESC with LINE inserted just above `Tags:'.
+Fallback: on the metadata side of the blank line before
+`Annotation:'.  Fallback further: appended.  LINE must end with
+a newline."
+  (cond
+   ((string-match "\nTags:" desc)
+    (let ((split (1+ (match-beginning 0))))
+      (concat (substring desc 0 split) line (substring desc split))))
+   ;; Match the blank line (two consecutive \n) before Annotation, so
+   ;; the inserted line lands on the metadata side of the separator.
+   ((string-match "\n\nAnnotation:" desc)
+    (let ((split (1+ (match-beginning 0))))
+      (concat (substring desc 0 split) line (substring desc split))))
+   (t (concat desc line))))
+
+(defun bmkp-gt-auto-update--describe-advice (orig-fn bookmark &rest rest)
+  "Inject an `Auto-update: yes' line into the description string.
+Only when BOOKMARK carries the `auto-update' property (non-nil)."
+  (let ((desc (apply orig-fn bookmark rest)))
+    (if (bookmark-prop-get bookmark 'auto-update)
+        (bmkp-gt-auto-update--inject-line desc "Auto-update:\t\tyes\n")
+      desc)))
+
+
 ;;; Install / uninstall -------------------------------------------------
 
 (defun bmkp-gt-auto-update-install ()
@@ -316,12 +370,15 @@ Idempotent.  Called at load time when
               '((depth . -100)))
   (advice-add 'bmkp-bmenu-mode-status-help :after
               #'bmkp-gt-auto-update--legend-advice)
+  (advice-add 'bmkp-bookmark-description :around
+              #'bmkp-gt-auto-update--describe-advice)
   (define-key bookmark-bmenu-mode-map (kbd "^") #'bmkp-gt-auto-update-bmenu-toggle))
 
 (defun bmkp-gt-auto-update-uninstall ()
   "Reverse `bmkp-gt-auto-update-install'."
   (advice-remove 'bmkp-bmenu-list-1 #'bmkp-gt-auto-update--list-1-advice)
   (advice-remove 'bmkp-bmenu-mode-status-help #'bmkp-gt-auto-update--legend-advice)
+  (advice-remove 'bmkp-bookmark-description #'bmkp-gt-auto-update--describe-advice)
   (when (eq (lookup-key bookmark-bmenu-mode-map (kbd "^"))
             #'bmkp-gt-auto-update-bmenu-toggle)
     (define-key bookmark-bmenu-mode-map (kbd "^") nil)))

@@ -121,6 +121,16 @@ pinned to =position= on each refresh so upstream's region-restore
 path (which errors on region-less bookmarks under =bmkp-use-region=)
 is never taken for an auto-update bookmark.
 
+The refresh uses the buffer's own =bookmark-make-record-function=,
+so it captures the fields the buffer's mode considers meaningful —
+=position= and context strings for text, =page= / =slice= / =size=
+/ =origin= for PDF, =info-node= for Info, =location= for EWW,
+=dired-directory= et al. for Dired, and so on.  Any mode that ships
+a proper record function is handled automatically; no per-mode list
+to maintain.  Identity/history fields (=id=, =tags=, =annotation=,
+=auto-update=, =created=, =visits=, =last-visited=, =defaults=) are
+always preserved.
+
 Display: =*Bookmark List*= renders a fifth marks column with =^= on
 each auto-update bookmark, using face =bmkp-gt-auto-update-mark= while
 the mode is on and =bmkp-gt-auto-update-mark-inactive= (inverse-video)
@@ -138,6 +148,10 @@ live status of whether the mode is on or off.
 The toggle does not itself call =bookmark-save= (matches
 =bmkp-toggle-temporary-bookmark=); the property change is tracked in
 =bmkp-modified-bookmarks= and persists on the next Bookmark+ save.
+
+=C-h RET= (=bmkp-describe-bookmark=) on an auto-update bookmark shows
+an =Auto-update: yes= line in the description, immediately above
+=Tags:=.  Bookmarks without the property render exactly as upstream.
 
 * Annotations
 
