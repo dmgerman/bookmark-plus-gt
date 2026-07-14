@@ -23,7 +23,6 @@ carrying repository for hot-fixes.
 | 1 | =bookmark--jump-via=                     | =bookmark+-1.el=   | logic + related lazy help-echo  | applies                   |
 | 2 | =bookmark-bmenu-switch-other-window=     | =bookmark+-bmu.el= | display-buffer action           | applies                   |
 | 3 | =bmkp-jump-dired=                        | =bookmark+-1.el=   | new =display-buffer= arm          | applies (needs #2)        |
-| 5 | =bookmark-write-file=                    | =bookmark+-1.el=   | timestamp cache update          | does not manifest (see body) |
 | 6 | consult-driven jump display              | =bookmark+-1.el=   | subsumed by #1                  | conditional               |
 
 (Bug 4 was investigated and removed — it was a bookmark-x-only
@@ -40,17 +39,6 @@ Bugs 2 and 3 are related — Bug 2's overriding-action
 installation is the caller that Bug 3's handler mishandled.
 Both fixes are needed; either alone still shows the symptom in
 some scenarios.
-
-Bug 5 is a real gap between =bookmark-plus='s redefined
-=bookmark-write-file= and vanilla behavior, but does not produce
-the described symptom in a pure =bookmark-plus= session because
-=bookmark-plus= also redefines =bookmark-maybe-load-default-file=
-(=bookmark+-1.el=:2892) to use a boolean =bmkp-bookmarks-already-loaded=
-instead of consulting =bookmark-bookmarks-timestamp=. The
-symptom would only appear if vanilla =bookmark-maybe-load-default-file=
-somehow ran while =bookmark-plus= was loaded — an unusual state.
-Retained for completeness; see the body for the exact reasoning.
-
 
 * Bug 1 — =bookmark--jump-via= does not display for custom-handler jumps
 
@@ -548,86 +536,6 @@ model of this patch is cleaner.
 
 Downstream commit in =dmgerman/bookmark-x=:
 [[https://github.com/dmgerman/bookmark-x/commit/a07d516][=a07d516=]].
-
-* Bug 5 — Save prompts to reload the file Emacs just wrote
-
-** Symptom
-
-If the user's bookmark file (=bookmark-default-file=, or whichever
-file is tracked by =bookmark-bookmarks-timestamp=) is the one being
-saved, Emacs prompts on the *next* access to reload it — because
-=bookmark-maybe-load-default-file= sees the file's modification
-time is newer than the recorded timestamp.
-
-** Reproducer
-
-1. Set =bookmark-default-file= to a shared bookmark file that
-   bookmark-plus is also writing (a common setup for users who use
-   the built-in =bookmark= functions and =bookmark-plus= in the
-   same session).
-2. Add a bookmark (=bmkp-set=), let =bookmark-save-flag= write.
-3. Perform any command that calls =bookmark-maybe-load-default-file=
-   (e.g. =M-x bookmark-jump=).
-4. Expected: no prompt. Observed: "Bookmark file X has changed on
-   disk. Reload it? (y or n)" for the file Emacs itself just wrote.
-
-** Root cause
-
-=bookmark-plus= redefines =bookmark-write-file= (in
-=bookmark+-1.el= at ~line 3553). The redefined function writes
-the file but does not update =bookmark-bookmarks-timestamp= —
-the mtime cache the built-in loader consults. Vanilla's
-=bookmark-write-file= updates the timestamp via
-=bookmark-set-bookmarks-timestamp=; the =bookmark-plus=
-redefinition dropped that call.
-
-** Proposed patch
-
-Update =bookmark-bookmarks-timestamp= at the end of the write
-path when the on-disk file is the one the built-in loader
-tracks. Skip the ADD path — that flow writes records that are
-not in =bookmark-alist=, and updating the timestamp there would
-hide genuine external changes.
-
-#+begin_src diff
-diff --git a/bookmark+-1.el b/bookmark+-1.el
---- a/bookmark+-1.el
-+++ b/bookmark+-1.el
-@@ -3673,4 +3673,19 @@
-           (setq bookmark-file-coding-system  coding-system-for-write))
-         (unless existing-buf (kill-buffer (current-buffer)))
-         (run-hook-with-args 'bmkp-write-bookmark-file-hook file)
-+        ;; Keep built-in `bookmark-bookmarks-timestamp' in sync so the
-+        ;; built-in `bookmark-maybe-load-default-file' does not prompt
-+        ;; to reload the file Emacs itself just wrote.  Only when the
-+        ;; on-disk file is the one the built-in loader is tracking, and
-+        ;; only for a full write (ADD mode leaves the file with records
-+        ;; that are not in `bookmark-alist').
-+        (when (and (not errorp)
-+                   (not add)
-+                   (stringp (car-safe bookmark-bookmarks-timestamp))
-+                   (string= (expand-file-name file)
-+                            (car bookmark-bookmarks-timestamp)))
-+          (setq bookmark-bookmarks-timestamp
-+                (cons (car bookmark-bookmarks-timestamp)
-+                      (file-attribute-modification-time
-+                       (file-attributes file)))))
-         (unless errorp (message (concat msg "done") file))))))
-#+end_src
-
-** Note
-
-=errorp=, =add=, and =file= are all bound in the enclosing =let=
-of =bookmark-write-file=, so no additional arguments or state
-are required. Verify against your current tip that
-=bookmark-bookmarks-timestamp='s shape is =(FILE . MTIME)= (it
-has been since Emacs 27); the =car-safe= / =stringp= guard makes
-the code tolerant of an unbound or reshaped value.
-
-** Origin
-
-Downstream commit in =dmgerman/bookmark-x=:
-[[https://github.com/dmgerman/bookmark-x/commit/137f219][=137f219=]].
 
 * Bug 6 — Consult-driven jump loads the file but does not display it
 
