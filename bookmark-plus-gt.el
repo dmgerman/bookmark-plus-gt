@@ -20,25 +20,27 @@
 
 ;;; Commentary:
 ;;
-;; Single `use-package' entry point for bookmark-plus-gt:
+;; `use-package' entry point for bookmark-plus-gt:
 ;;
 ;;   (use-package bookmark-plus-gt
 ;;     :load-path "~/.emacs.d/modules/bookmark-plus-gt"
 ;;     :straight nil
-;;     :after bookmark+)
+;;     :after bookmark+
+;;     :config
+;;     (require 'bookmark-plus-gt-preview)
+;;     (require 'bookmark-plus-gt-tags)
+;;     (require 'bookmark-plus-gt-auto-update))
 ;;
-;; Which feature files load is controlled by `bmkp-gt-features',
-;; a list of symbols (default: all features on).  Set it before
-;; the entry point is required — from `use-package :init':
+;; This file itself only sets up the always-on pieces (the
+;; `bookmark--jump-via' display fix, the state-file persistence
+;; intercept, and the `bmkp-gt-relocate-here' commands).  The three
+;; optional feature files above are loaded by the user with
+;; `require'; comment any out to skip it.
 ;;
-;;   (use-package bookmark-plus-gt
-;;     :init (setq bmkp-gt-features '(preview tags))  ; skip auto-update
-;;     ...)
-;;
-;; The auto-update feature has an additional per-file toggle
-;; (`bmkp-gt-auto-update-enable-flag') for controlling whether the
-;; mode auto-enables *after* the file is loaded.  The entry-point
-;; flag controls whether the file is loaded at all.
+;; The auto-update feature has a per-file toggle
+;; (`bmkp-gt-auto-update-enable-flag') controlling whether the mode
+;; auto-enables at load; that is independent of whether the file is
+;; loaded at all.
 
 ;;; Code:
 
@@ -70,22 +72,6 @@ tick.")
 (defgroup bookmark-plus-gt nil
   "Non-invasive extensions to Bookmark+."
   :group 'bookmark-plus)
-
-(defcustom bmkp-gt-features '(preview tags auto-update)
-  "Feature files loaded by `bookmark-plus-gt'.
-Each symbol NAME triggers a `require' of `bookmark-plus-gt-NAME'.
-
-Set this before the entry point is required — for example, in a
-`use-package :init' block — otherwise the require happens with
-the default (all features on)."
-  :type '(set (const :tag "Preview / consult jump reader" preview)
-              (const :tag "Tags and type columns"         tags)
-              (const :tag "Auto-update reading position"  auto-update))
-  :group 'bookmark-plus-gt)
-
-(dolist (feat bmkp-gt-features)
-  (require (intern (format "bookmark-plus-gt-%s" feat))))
-
 
 ;;; Bug 1 — Custom-handler jumps do not display (always-on) -------------
 ;;

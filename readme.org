@@ -10,40 +10,52 @@ Bookmark+ itself is not modified.
 (use-package bookmark-plus-gt
   :load-path "~/.emacs.d/modules/bookmark-plus-gt"
   :straight nil
-  :after bookmark+)
-#+end_src
-
-The entry point loads every feature by default.  To load only a
-subset, set =bmkp-gt-features= in =:init= (it must be set before the
-require):
-
-#+begin_src emacs-lisp
-(use-package bookmark-plus-gt
-  :load-path "~/.emacs.d/modules/bookmark-plus-gt"
-  :straight nil
   :after bookmark+
-  :init (setq bmkp-gt-features '(preview tags)))  ; skip auto-update
+  :config
+  ;; Optional features — comment out any you do not want.
+  (require 'bookmark-plus-gt-preview)       ; consult jump reader + list preview
+  (require 'bookmark-plus-gt-tags)          ; tags and type columns in *Bookmark List*
+  (require 'bookmark-plus-gt-auto-update))  ; reading-position tracker
 #+end_src
 
-Feature symbols:
+=bookmark+= is a hard requirement of the whole package (the entry
+point loads it before anything else); it is not repeated per
+feature below.
 
-- =preview= — the =consult=-backed jump reader
+Feature files:
+
+- =bookmark-plus-gt-preview= — the =consult=-backed jump reader
   (=bmkp-gt-jump= and its variants) plus =bmkp-gt-list-preview-mode=
   for =*Bookmark List*=.  See "Minibuffer filtering" and
   "Annotations" below.
-- =tags= — extra columns in =*Bookmark List*= between the name and
-  the filename: a tags column (=;=) and a type column (=@=).  See
-  "*Bookmark List* columns" below.
-- =auto-update= — the reading-position tracker: bookmarks carrying
-  the =auto-update= property have their location refreshed as the
-  file is read.  See "Auto-update bookmarks" below.
+  - Optional: =consult= (without it, the reader falls back to
+    =bookmark-completing-read= and the narrow-key + live-preview
+    features are unavailable), =marginalia= (adds the tag column and
+    rewrites the type column in the annotation), =orderless= (needed
+    for stacked =@Type ;tag= minibuffer filtering — see "Minibuffer
+    filtering" below).
+- =bookmark-plus-gt-tags= — extra columns in =*Bookmark List*=
+  between the name and the filename: a tags column (=;=) and a type
+  column (=@=).  See "*Bookmark List* columns" below.
+  - Requires =bookmark-plus-gt-preview= (for the type-label
+    helper).  Loading this file pulls in preview even if the preview
+    =require= above is commented out.
+- =bookmark-plus-gt-auto-update= — the reading-position tracker:
+  bookmarks carrying the =auto-update= property have their location
+  refreshed as the file is read.  See "Auto-update bookmarks" below.
+  - No extra requirements.
 
-Two things are always on regardless of =bmkp-gt-features=, because
-they are not features you can meaningfully opt out of:
+Two things are always on when =bookmark-plus-gt= itself is loaded,
+because they are not features you can meaningfully opt out of:
 
-- The =bmkp-gt-relocate-here= command (see "Commands" below).
+- The =bmkp-gt-relocate-here= and =bmkp-gt-relocate-this-file-here=
+  commands (see "Commands" below).
 - The =bookmark--jump-via= advice that ensures custom-handler jumps
   actually display their destination (a bookmark-plus bug fix).
+- The =customize-save-variable= intercept that routes bookmark-plus
+  runtime state (=bmkp-last-as-first-bookmark-file=) to
+  =bmkp-gt-state-file= instead of =custom-file=.  See "State
+  persistence" below.
 
 * Commands
 
@@ -95,7 +107,20 @@ they are not features you can meaningfully opt out of:
 
 * Minibuffer filtering (=bmkp-gt-jump=)
 
-Every candidate carries hidden tokens matched by orderless/substring:
+Every candidate carries hidden tokens that are part of the
+candidate string but invisible in the display (via =display "")=.
+Filtering by these tokens depends on the matching style
+(=completion-styles=), not on the UI (vertico / ivy / helm /
+default =completing-read= are all fine).
+
+*Only =orderless= makes them fully useful.*  It splits input on
+whitespace and matches each clause independently against the
+raw candidate string, so =@Dired ;work= reduces the list to
+Dired-category bookmarks tagged =work=.  Other built-in styles
+handle the tokens poorly: =substring= matches only a single
+contiguous input (so =@Dired= alone works, =@Dired ;work= does
+not); =basic= and =partial-completion= only prefix-match and see
+nothing; =flex= is too permissive to be a useful filter.
 
 - =@Type= — group label from =bmkp-gt-jump-narrow=
   (=@File=, =@Dired=, =@Web=, =@Magit=, =@Epub=, …).  =@= avoids
@@ -112,8 +137,39 @@ Facet keys inside the minibuffer:
 - =M-D= — pop the last filter.
 - =M-T= — clear all filters.
 
-Type narrowing uses =consult-narrow-key=; e.g. with it set to ="C-+"=,
-=C-+ d= narrows to Dired.  Without it: =M-x consult-narrow=.
+** Type narrowing (single-key filter)
+
+Consult's narrow mechanism gives a single-key alias for each type
+group.  The prefix is =consult-narrow-key= (default =<=; set it to
+=C-== or similar if you prefer a modifier).  Then in the
+=bmkp-gt-jump= minibuffer:
+
+- =PREFIX f= — File
+- =PREFIX d= — Dired
+- =PREFIX i= — Info
+- =PREFIX o= — Org heading
+- =PREFIX n= — News/Gnus
+- =PREFIX m= — Man/Help
+- =PREFIX p= — Picture
+- =PREFIX w= — Web
+- =PREFIX u= — URL
+- =PREFIX s= — Shell
+- =PREFIX v= — Doc view / PDF
+- =PREFIX D= — Desktop
+- =PREFIX S= — Snippet
+- =PREFIX g= — Magit
+- =PREFIX ?= — help menu listing every char with its label
+- =PREFIX SPC= (or press the prefix again with no char) — clear
+  narrowing
+
+The full mapping (label, char, matching handlers) is
+=bmkp-gt-jump-narrow=; edit it to rename, add, or remove groups.
+The narrowing is filtered by consult *before* orderless matches
+the input string, so a narrow + typed query composes as an AND.
+
+Without consult, the same taxonomy is available via the =@Type=
+hidden token above (e.g. type =@Dired= in the minibuffer).  Both
+mechanisms are derived from the same =bmkp-gt-jump-narrow= list.
 
 ** Sorting and grouping candidates
 
@@ -242,7 +298,6 @@ bookmark name.
 
 | Option                                   | Purpose                                     |
 |------------------------------------------+---------------------------------------------|
-| =bmkp-gt-features=                       | Feature files loaded by the entry point (default: all). |
 | =bmkp-gt-preview-use-consult-flag=       | Toggle the consult reader (default =t=).    |
 | =bmkp-gt-jump-narrow=                    | Handler → group mapping (label + narrow key). |
 | =bmkp-gt-jump-group-by=                  | =nil= / =type= / =tag=.                     |

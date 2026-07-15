@@ -19,10 +19,7 @@
 ;;
 ;; Assisted-by: Claude:claude-opus-4-7
 ;;
-;; Ported from `bookmark-x-preview.el' (bookmark-x, same author).
-;; Adapted to layer on top of Bookmark+ instead of Bookmark-X:
-;; `bmkx-*' → `bmkp-gt-*' for local symbols; calls out to
-;; `bookmark-*' / `bmkp-*' rather than `bmkx-*'.  Bookmark+ is not
+;; Adapted to layer on top of Bookmark+.  Bookmark+ is not
 ;; modified.
 
 ;;; Commentary:
@@ -148,49 +145,33 @@ in some other window without stealing focus from `*Bookmark List*'."
 (defcustom bmkp-gt-jump-narrow
   '((?f "File"           bookmark-default-handler)
     (?d "Dired"          bmkp-jump-dired
-                         bmkx-jump-dired
                          vc-dir-bookmark-jump)
-    (?i "Info"           Info-bookmark-jump
-                         Info-bmkx-jump)
+    (?i "Info"           Info-bookmark-jump)
     (?o "Org heading"    org-bookmark-heading-jump)
     (?n "News/Gnus"      bmkp-jump-gnus
-                         bmkx-jump-gnus
                          gnus-summary-bookmark-jump)
     (?m "Man/Help"       bmkp-jump-man
                          bmkp-jump-woman
-                         bmkx-jump-man
-                         bmkx-jump-woman
                          Man-bookmark-jump
                          woman-bookmark-jump
                          help-bookmark-jump)
-    (?p "Picture"        image-bookmark-jump
-                         image-bmkx-jump)
+    (?p "Picture"        image-bookmark-jump)
     (?w "Web"            bmkp-jump-eww
                          bmkp-jump-w3m
-                         bmkx-jump-eww
-                         bmkx-jump-w3m
                          eww-bookmark-jump
                          xwidget-webkit-bookmark-jump-handler)
-    (?u "URL"            bmkp-jump-url-browse
-                         bmkx-jump-url-browse)
+    (?u "URL"            bmkp-jump-url-browse)
     (?s "Shell"          eshell-bookmark-jump
                          shell-bookmark-jump)
     (?v "Doc view/PDF"   doc-view-bookmark-jump
                          pdf-view-bookmark-jump-handler)
-    (?D "Desktop"        bmkp-jump-desktop
-                         bmkx-jump-desktop)
-    (?L "Bookmark list"  bmkp-jump-bookmark-list
-                         bmkx-jump-bookmark-list)
-    (?F "Bookmark file"  bmkp-jump-bookmark-file
-                         bmkx-jump-bookmark-file)
-    (?S "Snippet"        bmkp-jump-snippet
-                         bmkx-jump-snippet)
-    (?V "Variable list"  bmkp-jump-variable-list
-                         bmkx-jump-variable-list)
-    (?q "Sequence"       bmkp-jump-sequence
-                         bmkx-jump-sequence)
-    (?x "Function/kmacro" bmkp-jump-function
-                          bmkx-jump-function)
+    (?D "Desktop"        bmkp-jump-desktop)
+    (?L "Bookmark list"  bmkp-jump-bookmark-list)
+    (?F "Bookmark file"  bmkp-jump-bookmark-file)
+    (?S "Snippet"        bmkp-jump-snippet)
+    (?V "Variable list"  bmkp-jump-variable-list)
+    (?q "Sequence"       bmkp-jump-sequence)
+    (?x "Function/kmacro" bmkp-jump-function)
     (?g "Magit"          magit--handle-bookmark)
     (?e "Epub"           nov-bookmark-jump-handler)
     (nil "Other"))
