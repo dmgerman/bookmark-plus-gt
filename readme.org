@@ -13,7 +13,7 @@ Bookmark+ itself is not modified.
   :after bookmark+
   :config
   ;; Optional features — comment out any you do not want.
-  (require 'bookmark-plus-gt-preview)         ; consult jump reader + list preview
+  (require 'bookmark-plus-gt-jump)         ; consult jump reader + list preview
   (require 'bookmark-plus-gt-tags)            ; tags and type columns in *Bookmark List*
   (require 'bookmark-plus-gt-auto-update)     ; reading-position tracker
   (require 'bookmark-plus-gt-browsel-tabs))   ; browser tabs as temporary URL bookmarks
@@ -25,7 +25,7 @@ feature below.
 
 Feature files:
 
-- =bookmark-plus-gt-preview= — the =consult=-backed jump reader
+- =bookmark-plus-gt-jump= — the =consult=-backed jump reader
   (=bmkp-gt-jump= and its variants) plus =bmkp-gt-list-preview-mode=
   for =*Bookmark List*=.  See "Minibuffer filtering" and
   "Annotations" below.
@@ -38,9 +38,9 @@ Feature files:
 - =bookmark-plus-gt-tags= — extra columns in =*Bookmark List*=
   between the name and the filename: a tags column (=;=) and a type
   column (=@=).  See "*Bookmark List* columns" below.
-  - Requires =bookmark-plus-gt-preview= (for the type-label
-    helper).  Loading this file pulls in preview even if the preview
-    =require= above is commented out.
+  - Requires =bookmark-plus-gt-jump= (for the type-label
+    helper).  Loading this file pulls in the jump module even if the
+    corresponding =require= above is commented out.
 - =bookmark-plus-gt-auto-update= — the reading-position tracker:
   bookmarks carrying the =auto-update= property have their location
   refreshed as the file is read.  See "Auto-update bookmarks" below.
@@ -65,12 +65,16 @@ because they are not features you can meaningfully opt out of:
   persistence" below.
 - The =bookmark-bmenu-execute-deletions= advice that keeps point on
   a surviving bookmark after =x=.  See "Post-delete point" below.
+- The safety guards around same-named bookmarks: force
+  =bmkp-bookmark-set-confirms-overwrite-p= on, and warn if
+  =bmkp-propertize-bookmark-names-flag= is off.  See "Same-named
+  bookmarks" below.
 
 * Commands
 
 - =bmkp-gt-jump=, =bmkp-gt-jump-other-window=, =bmkp-gt-jump-other-frame= —
   drop-in replacements for =bookmark-jump= et al.  When =consult= is
-  loaded (and =bmkp-gt-preview-use-consult-flag= is non-nil), the read
+  loaded (and =bmkp-gt-jump-use-consult-flag= is non-nil), the read
   is done through =consult--read= with live preview.  Falls back to
   =bookmark-completing-read= otherwise.  Bind them wherever you want;
   the standard Bookmark+ keys are left alone.
@@ -446,7 +450,7 @@ bookmark name.
 
 | Option                                   | Purpose                                     |
 |------------------------------------------+---------------------------------------------|
-| =bmkp-gt-preview-use-consult-flag=       | Toggle the consult reader (default =t=).    |
+| =bmkp-gt-jump-use-consult-flag=       | Toggle the consult reader (default =t=).    |
 | =bmkp-gt-jump-name-max-width=            | Cap on the visible name in `bmkp-gt-jump' (default =50=; =nil= = no cap). |
 | =bmkp-gt-jump-name-tail-keep=            | Characters kept at the tail of a display-truncated name in `bmkp-gt-jump' (default =10=). |
 | =bmkp-gt-jump-narrow=                    | Handler → group mapping (label + narrow key). |

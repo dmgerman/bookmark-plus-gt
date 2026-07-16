@@ -10,7 +10,7 @@ EMACS ?= emacs
 # Sibling Bookmark+ submodule; loaded before our own sources.
 PLUS_DIR = ../bookmark-plus
 
-CORE_FILES = bookmark-plus-gt-preview.el bookmark-plus-gt-tags.el bookmark-plus-gt-auto-update.el bookmark-plus-gt.el
+CORE_FILES = bookmark-plus-gt-jump.el bookmark-plus-gt-tags.el bookmark-plus-gt-auto-update.el bookmark-plus-gt.el
 
 .PHONY: test compile clean
 

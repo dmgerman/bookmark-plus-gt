@@ -52,14 +52,14 @@
 ;;     @   `bmkp-gt-bmenu-toggle-type'
 ;;
 ;; The `;' / `@' prefixes match the hidden tokens on `bmkp-gt-jump'
-;; candidates (`bookmark-plus-gt-preview'), so the same characters
+;; candidates (`bookmark-plus-gt-jump'), so the same characters
 ;; carry the same meaning in both interfaces.
 
 ;;; Code:
 
 (require 'bookmark)
 (require 'bookmark+)
-(require 'bookmark-plus-gt-preview)     ; for `bmkp-gt-jump-candidate-type-name'
+(require 'bookmark-plus-gt-jump)     ; for `bmkp-gt-jump-candidate-type-name'
 (require 'cl-lib)
 
 ;; Bookmark+ symbols we call into.  Declared for the byte compiler in

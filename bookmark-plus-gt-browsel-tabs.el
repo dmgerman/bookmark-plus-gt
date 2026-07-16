@@ -152,16 +152,16 @@ post-handler chain — annotation display, auto-light, fringe mark
       (no-catch nil))))
 
 
-;;; Register with the preview module's type list ---------------------
+;;; Register with the jump module's type list ---------------------
 ;;
-;; `bmkp-gt-jump-narrow' (in `bookmark-plus-gt-preview') maps a
+;; `bmkp-gt-jump-narrow' (in `bookmark-plus-gt-jump') maps a
 ;; bookmark handler symbol to a group label + narrow key.  Both
 ;; `bmkp-gt-jump' (consult narrow / minibuffer @Type filter) and the
 ;; type column in `*Bookmark List*' read from it, so registering the
 ;; browsel-tab handler makes it appear as `Browser tab' in both.
-;; The registration is a no-op when the preview module is not loaded.
+;; The registration is a no-op when the jump module is not loaded.
 
-(defvar bmkp-gt-jump-narrow)            ; In `bookmark-plus-gt-preview'.
+(defvar bmkp-gt-jump-narrow)            ; In `bookmark-plus-gt-jump'.
 
 (defun bmkp-gt-browsel-tabs--register-jump-narrow ()
   "Register the browsel-tab handler as `Browser tab' in `bmkp-gt-jump-narrow'.
@@ -172,7 +172,7 @@ Idempotent; safe to call repeatedly."
                    '(?b "Browser tab" bmkp-gt-browsel-tabs-jump)))))
 
 (bmkp-gt-browsel-tabs--register-jump-narrow)
-(with-eval-after-load 'bookmark-plus-gt-preview
+(with-eval-after-load 'bookmark-plus-gt-jump
   (bmkp-gt-browsel-tabs--register-jump-narrow))
 
 

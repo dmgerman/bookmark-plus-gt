@@ -27,7 +27,7 @@
 ;;     :straight nil
 ;;     :after bookmark+
 ;;     :config
-;;     (require 'bookmark-plus-gt-preview)
+;;     (require 'bookmark-plus-gt-jump)
 ;;     (require 'bookmark-plus-gt-tags)
 ;;     (require 'bookmark-plus-gt-auto-update))
 ;;
@@ -454,6 +454,37 @@ is passed through unchanged."
 
 (advice-add 'bookmark-bmenu-execute-deletions
             :around #'bmkp-gt--execute-deletions-around)
+
+
+;;; Same-named bookmarks — safety guards (always-on) -------------------
+;;
+;; Upstream `bookmark-set' silently merges into an existing bookmark of
+;; the same name — the new record picks up the old record's `tags' and
+;; `annotation' via `bmkp-properties-to-keep' (default '(tags
+;; annotation)) — so a second `bookmark-set' at a different location
+;; with the same name absorbs the previous bookmark's tags rather than
+;; creating a distinct bookmark.  Bookmark-plus-gt turns on the
+;; confirm-on-overwrite prompt so the merge cannot happen silently.
+;;
+;; Separately, verify `bmkp-propertize-bookmark-names-flag' — bookmark-
+;; plus needs it non-nil so that `C-u M-x bookmark-set' can hold
+;; multiple bookmarks with the same literal name in `bookmark-alist',
+;; disambiguated by text properties on the name string.  It's the
+;; default on Emacs > 20; we only check and warn.  The same
+;; disambiguation lets `bookmark-load' safely rename collisions to
+;; NAME<2>, NAME<3>, ...
+
+(defvar bmkp-bookmark-set-confirms-overwrite-p)
+(defvar bmkp-propertize-bookmark-names-flag)
+
+(setq bmkp-bookmark-set-confirms-overwrite-p t)
+
+(unless (and (boundp 'bmkp-propertize-bookmark-names-flag)
+             bmkp-propertize-bookmark-names-flag)
+  (display-warning
+   'bookmark-plus-gt
+   "`bmkp-propertize-bookmark-names-flag' is nil; same-named bookmarks may collide silently."
+   :warning))
 
 
 (provide 'bookmark-plus-gt)
