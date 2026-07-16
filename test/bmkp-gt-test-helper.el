@@ -16,7 +16,7 @@
 (require 'ert)
 (require 'bookmark)
 (require 'bookmark+)
-(require 'bookmark-plus-gt-preview)
+(require 'bookmark-plus-gt-jump)
 
 (defvar bmkp-gt-test--temp-files nil
   "Temp bookmark files created in the current test run, for cleanup.")

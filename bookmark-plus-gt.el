@@ -487,5 +487,71 @@ is passed through unchanged."
    :warning))
 
 
+;;; Load-order stack sort ---------------------------------------------
+;;
+;; Bookmark files loaded on top of each other form a stack: the file
+;; loaded most recently is the top of the stack, and its bookmarks
+;; should sort first in `*Bookmark List*'.  Bookmark-plus does not
+;; track load order out of the box, so we tag each loaded bookmark
+;; with a monotonic `bmkp-gt-load-index' property (higher = more
+;; recently loaded) and expose a comparer `bmkp-gt-sort-by-load-order'
+;; the user opts into via `bmkp-sort-comparer'.
+;;
+;; The initial auto-load path (`bookmark-maybe-load-default-file' →
+;; `bookmark-load') runs through the same advice, so the default
+;; bookmark file's entries get index 1; a subsequent `M-x
+;; bookmark-load' gets index 2; and so on.  Bookmarks created in
+;; the current session with `bookmark-set' carry no index — the
+;; comparer treats them as `most-positive-fixnum' so they sort at
+;; the top (they are the freshest); ties fall through to whatever
+;; next comparer bookmark-plus is chaining.
+
+(defvar bmkp-gt--load-counter 0
+  "Monotonic counter incremented on every `bookmark-load' call.
+Used by `bmkp-gt--stamp-load-index' to assign a `bmkp-gt-load-index'
+property to each loaded bookmark.  Reset only by killing Emacs.")
+
+(defun bmkp-gt--stamp-load-index (blist)
+  "`:filter-return' advice on `bookmark-load'.
+BLIST is the list of freshly-loaded bookmarks returned by
+`bookmark-load'.  Increment `bmkp-gt--load-counter' and stamp each
+bookmark in BLIST with that new value under property
+`bmkp-gt-load-index' — but only if the bookmark does not already
+carry an index (so a re-load preserves the earlier assignment).
+Returns BLIST unchanged so `bookmark-load's contract is preserved."
+  (setq bmkp-gt--load-counter (1+ bmkp-gt--load-counter))
+  (dolist (bmk blist)
+    (unless (bookmark-prop-get bmk 'bmkp-gt-load-index)
+      (bookmark-prop-set bmk 'bmkp-gt-load-index bmkp-gt--load-counter)))
+  blist)
+
+(advice-add 'bookmark-load :filter-return #'bmkp-gt--stamp-load-index)
+
+;;;###autoload
+(defun bmkp-gt-sort-by-load-order (b1 b2)
+  "Comparer: bookmarks from a more-recent `bookmark-load' sort first.
+Reads `bmkp-gt-load-index' from each bookmark record.  Higher index
+sorts before lower.  Bookmarks with no index (created in-session via
+`bookmark-set') are treated as `most-positive-fixnum' so they sort at
+the top with each other; ties (same index) return nil so bookmark-
+plus's chained comparer takes over — usually alphabetical.
+
+Return value follows bookmark-plus's comparer convention:
+  `(t)'   — B1 sorts before B2
+  `(nil)' — B2 sorts before B1
+  nil     — incomparable / tie, fall through.
+
+To make this the default sort in `*Bookmark List*':
+  (setq bmkp-sort-comparer #\\='bmkp-gt-sort-by-load-order)"
+  (setq b1  (bmkp-get-bookmark b1)
+        b2  (bmkp-get-bookmark b2))
+  (let* ((max-idx  most-positive-fixnum)
+         (i1  (or (bookmark-prop-get b1 'bmkp-gt-load-index) max-idx))
+         (i2  (or (bookmark-prop-get b2 'bmkp-gt-load-index) max-idx)))
+    (cond ((> i1 i2)  '(t))
+          ((< i1 i2)  '(nil))
+          (t          nil))))
+
+
 (provide 'bookmark-plus-gt)
 ;;; bookmark-plus-gt.el ends here

@@ -416,5 +416,75 @@ match on the bookmark name.  Returns the buffer."
       (should (eq 'orig-result got)))))
 
 
+;;; Load-order stack sort ---------------------------------------------
+
+(ert-deftest bmkp-gt-test-load-order/counter-defined ()
+  "`bmkp-gt--load-counter' starts as a non-negative integer."
+  (should (boundp 'bmkp-gt--load-counter))
+  (should (integerp bmkp-gt--load-counter)))
+
+(ert-deftest bmkp-gt-test-load-order/comparer-defined ()
+  "`bmkp-gt-sort-by-load-order' is a two-arg function."
+  (should (fboundp 'bmkp-gt-sort-by-load-order)))
+
+(ert-deftest bmkp-gt-test-load-order/comparer-higher-index-first ()
+  "The comparer returns `(t)' when B1's load index is higher than B2's."
+  (let ((b1  (list "high" '(bmkp-gt-load-index . 5)))
+        (b2  (list "low"  '(bmkp-gt-load-index . 2))))
+    (should (equal '(t)   (bmkp-gt-sort-by-load-order b1 b2)))
+    (should (equal '(nil) (bmkp-gt-sort-by-load-order b2 b1)))))
+
+(ert-deftest bmkp-gt-test-load-order/comparer-tie-falls-through ()
+  "Same load-index returns nil (fall through to next comparer)."
+  (let ((b1  (list "a" '(bmkp-gt-load-index . 3)))
+        (b2  (list "b" '(bmkp-gt-load-index . 3))))
+    (should (null (bmkp-gt-sort-by-load-order b1 b2)))))
+
+(ert-deftest bmkp-gt-test-load-order/unindexed-sorts-at-top ()
+  "Bookmarks with no `bmkp-gt-load-index' sort at the top."
+  (let ((indexed    (list "loaded"  '(bmkp-gt-load-index . 5)))
+        (unindexed  (list "in-session" '(filename . "x"))))
+    (should (equal '(t)   (bmkp-gt-sort-by-load-order unindexed indexed)))
+    (should (equal '(nil) (bmkp-gt-sort-by-load-order indexed  unindexed)))))
+
+(ert-deftest bmkp-gt-test-load-order/stamp-assigns-fresh-index ()
+  "`bmkp-gt--stamp-load-index' bumps the counter and stamps each bookmark."
+  (let* ((bmkp-gt--load-counter  0)
+         (blist  (list (list "a" '(filename . "/tmp/a"))
+                       (list "b" '(filename . "/tmp/b")))))
+    (bmkp-gt--stamp-load-index blist)
+    (should (= 1 bmkp-gt--load-counter))
+    (should (= 1 (bookmark-prop-get (car blist)  'bmkp-gt-load-index)))
+    (should (= 1 (bookmark-prop-get (cadr blist) 'bmkp-gt-load-index)))))
+
+(ert-deftest bmkp-gt-test-load-order/stamp-preserves-existing-index ()
+  "A bookmark that already has `bmkp-gt-load-index' keeps its value."
+  (let* ((bmkp-gt--load-counter  0)
+         (pre    (list "old" '(bmkp-gt-load-index . 42) '(filename . "/tmp/a")))
+         (fresh  (list "new" '(filename . "/tmp/b"))))
+    (bmkp-gt--stamp-load-index (list pre fresh))
+    (should (= 42 (bookmark-prop-get pre   'bmkp-gt-load-index)))
+    (should (= 1  (bookmark-prop-get fresh 'bmkp-gt-load-index)))))
+
+(ert-deftest bmkp-gt-test-load-order/stack-behavior-across-loads ()
+  "Two `bookmark-load' calls tag the second file's bookmarks higher."
+  (let ((bmkp-gt--load-counter  0)
+        (blist-a  (list (list "a1" '(filename . "/tmp/a1"))))
+        (blist-b  (list (list "b1" '(filename . "/tmp/b1")))))
+    (bmkp-gt--stamp-load-index blist-a)
+    (bmkp-gt--stamp-load-index blist-b)
+    (let ((ia  (bookmark-prop-get (car blist-a) 'bmkp-gt-load-index))
+          (ib  (bookmark-prop-get (car blist-b) 'bmkp-gt-load-index)))
+      (should (< ia ib))
+      (should (equal '(t) (bmkp-gt-sort-by-load-order (car blist-b) (car blist-a)))))))
+
+
+;;; Overwrite-confirm guard --------------------------------------------
+
+(ert-deftest bmkp-gt-test-safety/overwrite-confirm-set ()
+  "`bmkp-bookmark-set-confirms-overwrite-p' is set to t at load time."
+  (should (eq t bmkp-bookmark-set-confirms-overwrite-p)))
+
+
 (provide 'bmkp-gt-test-entry)
 ;;; bmkp-gt-test-entry.el ends here
