@@ -66,6 +66,20 @@
 (require 'browsel)
 (require 'seq)
 
+(defconst bmkp-gt-browsel-tabs--browsel-min-version "0.94"
+  "Minimum `browsel-version' this module supports.
+Earlier browsel builds lack `browsel-focus-tab' /
+`browsel-close-tab' and the `:browsel-browser' extension key on
+`browsel-browser-tabs' results.  We check at load time.")
+
+(unless (and (boundp 'browsel-version)
+             (stringp browsel-version)
+             (version<= bmkp-gt-browsel-tabs--browsel-min-version
+                        browsel-version))
+  (error "bookmark-plus-gt-browsel-tabs: browsel %s or later required (found %s)"
+         bmkp-gt-browsel-tabs--browsel-min-version
+         (if (boundp 'browsel-version) browsel-version "unknown")))
+
 (declare-function browsel-browser-tabs "browsel")
 (declare-function browsel-focus-tab    "browsel")
 (declare-function browsel-close-tab    "browsel")

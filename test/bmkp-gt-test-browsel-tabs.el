@@ -429,4 +429,26 @@ the row does NOT come back."
             (kill-buffer bmkp-bmenu-buffer)))))))
 
 
+;;; Version guard -----------------------------------------------------
+
+(ert-deftest bmkp-gt-test-btabs/browsel-min-version-defined ()
+  "`bmkp-gt-browsel-tabs--browsel-min-version' is `\"0.94\"'."
+  (should (equal "0.94" bmkp-gt-browsel-tabs--browsel-min-version)))
+
+(ert-deftest bmkp-gt-test-btabs/version-check-accepts-current-and-newer ()
+  "The version comparison used at load time accepts 0.94 and newer."
+  (let ((min  bmkp-gt-browsel-tabs--browsel-min-version))
+    (should (version<= min "0.94"))
+    (should (version<= min "0.95"))
+    (should (version<= min "1.0"))
+    (should (version<= min "0.100"))))
+
+(ert-deftest bmkp-gt-test-btabs/version-check-rejects-older ()
+  "The version comparison rejects any pre-0.94 release."
+  (let ((min  bmkp-gt-browsel-tabs--browsel-min-version))
+    (should-not (version<= min "0.93"))
+    (should-not (version<= min "0.9"))
+    (should-not (version<= min "0.1"))))
+
+
 ;;; bmkp-gt-test-browsel-tabs.el ends here

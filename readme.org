@@ -48,7 +48,9 @@ Feature files:
 - =bookmark-plus-gt-browsel-tabs= — every open browser tab exposed
   as a temporary URL bookmark.  See "Browser tabs as temporary
   bookmarks" below.
-  - Requires [[https://github.com/dmgerman/browsel][browsel]] (loaded and connected to at least one browser).
+  - Requires [[https://github.com/dmgerman/browsel][browsel]] version =0.94= or later (loaded and connected to
+    at least one browser).  The module checks =browsel-version= at
+    load time and signals an error if it is older.
 
 Two things are always on when =bookmark-plus-gt= itself is loaded,
 because they are not features you can meaningfully opt out of:

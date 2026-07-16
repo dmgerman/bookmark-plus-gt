@@ -15,6 +15,9 @@
 
 (unless (featurep 'browsel)
 
+  (defvar browsel-version "0.94"
+    "Stub browsel version — meets `bookmark-plus-gt-browsel-tabs' minimum.")
+
   (defun browsel-browser-tabs (&optional _browsers)
     "Stub: return nil (no tabs)."
     nil)
