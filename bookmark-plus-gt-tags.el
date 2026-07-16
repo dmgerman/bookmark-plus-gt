@@ -117,6 +117,37 @@ cap."
   :type 'integer
   :group 'bookmark-plus-gt)
 
+(defcustom bmkp-gt-bmenu-name-max-width 50
+  "Cap on the name-column width, in characters.
+
+Non-nil (positive integer) — the tags/type start columns are
+computed from `min(widest-name, cap)', and each row's name is
+smart-truncated at render time so no row extends past the cap.
+Truncation keeps the first characters of the name and the last
+`bmkp-gt-bmenu-name-tail-keep' characters, joined by a single
+ellipsis (`…').  The buffer text itself is left intact — only a
+`display' property is set — so `bookmark-bmenu-bookmark',
+`bmkp-jump-to-current-annotation-position', and other lookups
+still see the full name.
+
+nil — no cap; the tags and type columns start after the widest
+name in the alist (the pre-cap behavior).
+
+The cap has no effect when both `bmkp-gt-bmenu-show-tags-flag'
+and `bmkp-gt-bmenu-show-type-flag' are nil: with neither extra
+column shown, the render advice bails out before applying the cap
+and the full name is displayed in the row."
+  :type '(choice (const :tag "No cap" nil) (integer :tag "Max chars"))
+  :group 'bookmark-plus-gt)
+
+(defcustom bmkp-gt-bmenu-name-tail-keep 10
+  "Number of characters kept at the tail of a truncated name.
+Used only when `bmkp-gt-bmenu-name-max-width' is non-nil.  Rows
+whose name exceeds the cap render as `<head>…<tail>' where <tail>
+is this many characters."
+  :type 'integer
+  :group 'bookmark-plus-gt)
+
 (defface bmkp-gt-bmenu-tags
   '((t :inherit completions-annotations))
   "Face for the tags column in `*Bookmark List*'."
@@ -165,12 +196,18 @@ minibuffer.  Truncated to `bmkp-gt-bmenu-type-max-width'."
 
 (defun bmkp-gt-bmenu--compute-name-end ()
   "Return the column at which the name column ends in the current list.
-Uses `bmkp-sorted-alist' (populated by `bmkp-bmenu-list-1')."
-  (+ bmkp-bmenu-marks-width
-     (apply #'max 0
-            (mapcar (lambda (bmk)
-                      (string-width (bmkp-bookmark-name-from-record bmk)))
-                    (or bmkp-sorted-alist ())))))
+Uses `bmkp-sorted-alist' (populated by `bmkp-bmenu-list-1').
+When `bmkp-gt-bmenu-name-max-width' is non-nil, the widest name
+is clamped to that value before the marks-width offset is added."
+  (let ((widest  (apply #'max 0
+                        (mapcar (lambda (bmk)
+                                  (string-width (bmkp-bookmark-name-from-record bmk)))
+                                (or bmkp-sorted-alist ())))))
+    (+ bmkp-bmenu-marks-width
+       (if (and bmkp-gt-bmenu-name-max-width
+                (> widest bmkp-gt-bmenu-name-max-width))
+           bmkp-gt-bmenu-name-max-width
+         widest))))
 
 (defun bmkp-gt-bmenu--compute-tags-width ()
   "Return the widest tags-string width across `bmkp-sorted-alist'."
@@ -221,15 +258,18 @@ column is on; otherwise falls back to the upstream defcustom."
 (defun bmkp-gt-bmenu--insert-column (start-col format-fn face)
   "Walk every bookmark row, insert a column starting at START-COL.
 For each row, calls FORMAT-FN with the bookmark record and inserts
-its result padded to the column start.  FACE is applied to the
-inserted text.  Empty strings from FORMAT-FN insert only the
-padding.
+its result padded to the column start.  Empty strings from
+FORMAT-FN insert only the padding.
 
-Padding inserted by `move-to-column ... t' inherits text
-properties (including `face') from the preceding character.
-Bookmark+'s row-level type face (e.g. `bmkp-url', `bmkp-file')
-therefore bleeds across the tags column when the row is padded.
-Strip `face' from the padding to prevent that."
+The inserted text is propertized with the row's own
+`font-lock-face' — bookmark-plus's row-type face (`bmkp-url',
+`bmkp-local-file-without-region', `bmkp-info', ...) — read from
+the beginning of the name column.  Upstream applies that same
+face to the whole `[marks-width, max-width]' range, so any
+background carried by the row-type face flows continuously across
+the name, the padding, and the tag / type text — no visible
+seam where the tag or type column starts.  FACE is used only as
+the fallback for rows that somehow lack a row-level face."
   (save-excursion
     (goto-char (point-min))
     (forward-line bmkp-bmenu-header-lines)
@@ -237,24 +277,67 @@ Strip `face' from the padding to prevent that."
       (while (< (point) (point-max))
         (let ((name  (bookmark-bmenu-bookmark)))
           (when name
-            (let* ((bmk         (bmkp-get-bookmark name 'NOERROR))
-                   (str         (and bmk (funcall format-fn bmk)))
-                   ;; Snapshot line end BEFORE `move-to-column' so we
-                   ;; can tell whether it inserted padding.  If the row
-                   ;; was already at least START-COL wide, no insert
-                   ;; happens and we must not touch existing faces.
-                   (row-end     (line-end-position)))
+            (let* ((bmk       (bmkp-get-bookmark name 'NOERROR))
+                   (str       (and bmk (funcall format-fn bmk)))
+                   (row-face  (get-text-property
+                               (+ (line-beginning-position) bmkp-bmenu-marks-width)
+                               'font-lock-face)))
               (move-to-column start-col t)
-              (when (> (line-end-position) row-end)
-                ;; Padding was inserted at ROW-END..point.  It
-                ;; inherited the preceding character's `face' via
-                ;; `insert' stickiness — strip so Bookmark+'s row-type
-                ;; face (e.g. `bmkp-url') does not bleed across the
-                ;; empty tags column.
-                (put-text-property row-end (point) 'face nil))
               (when (and str (not (string-empty-p str)))
-                (insert (propertize str 'face face))))))
+                (insert (propertize str 'font-lock-face (or row-face face)))))))
         (forward-line 1)))))
+
+
+;;; Long-name truncation ------------------------------------------------
+
+(defconst bmkp-gt-bmenu--ellipsis "…"
+  "Character rendered in place of the hidden middle of a truncated name.")
+
+(defun bmkp-gt-bmenu--truncate-long-names ()
+  "Truncate over-cap bookmark names in `*Bookmark List*'.
+For each row whose name exceeds `bmkp-gt-bmenu-name-max-width',
+rewrites the rendered name in the buffer to `<head>…<tail>' where
+<tail> is `bmkp-gt-bmenu-name-tail-keep' characters.  The
+bookmark-plus row-level text properties (`bmkp-bookmark-name',
+`bmkp-full-record', etc.) are copied onto the rewritten range so
+`bookmark-bmenu-bookmark' and every other row lookup still returns
+the full record.  The underlying bookmark alist entry is untouched.
+
+Buffer-text truncation (not `display' property) is used because
+`move-to-column' in `bmkp-gt-bmenu--insert-column' counts buffer
+characters — a `display' string is not accounted for and the
+tag/type columns would still land past the full-width name.
+
+No-op when `bmkp-gt-bmenu-name-max-width' is nil, or the head
+window (cap minus tail-keep minus 1 for the ellipsis) is zero or
+negative."
+  (when bmkp-gt-bmenu-name-max-width
+    (let* ((cap        bmkp-gt-bmenu-name-max-width)
+           (tail-keep  (max 0 bmkp-gt-bmenu-name-tail-keep))
+           (ellipsis   bmkp-gt-bmenu--ellipsis)
+           (head-keep  (- cap tail-keep (string-width ellipsis))))
+      (when (> head-keep 0)
+        (save-excursion
+          (goto-char (point-min))
+          (forward-line bmkp-bmenu-header-lines)
+          (let ((inhibit-read-only  t))
+            (while (< (point) (point-max))
+              (let ((name  (bookmark-bmenu-bookmark)))
+                (when (and name (> (length name) cap))
+                  (let* ((line-start  (line-beginning-position))
+                         (name-start  (+ line-start bmkp-bmenu-marks-width))
+                         (name-end    (+ name-start (length name)))
+                         (props       (text-properties-at name-start))
+                         (truncated   (concat (substring name 0 head-keep)
+                                              ellipsis
+                                              (substring name (- (length name) tail-keep)))))
+                    (delete-region name-start name-end)
+                    (goto-char name-start)
+                    (insert truncated)
+                    (add-text-properties name-start
+                                         (+ name-start (length truncated))
+                                         props))))
+              (forward-line 1))))))))
 
 
 ;;; :around advice on `bmkp-bmenu-list-1' --------------------------------
@@ -269,6 +352,7 @@ Strip `face' from the padding to prevent that."
       (let ((bookmark-bmenu-toggle-filenames  nil))
         (apply orig-fn args))
       (with-current-buffer bmkp-bmenu-buffer
+        (bmkp-gt-bmenu--truncate-long-names)
         (bmkp-gt-bmenu--insert-passes)
         (when filenames-were-on
           (let ((bookmark-bmenu-file-column       (bmkp-gt-bmenu--file-column))

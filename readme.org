@@ -13,9 +13,10 @@ Bookmark+ itself is not modified.
   :after bookmark+
   :config
   ;; Optional features — comment out any you do not want.
-  (require 'bookmark-plus-gt-preview)       ; consult jump reader + list preview
-  (require 'bookmark-plus-gt-tags)          ; tags and type columns in *Bookmark List*
-  (require 'bookmark-plus-gt-auto-update))  ; reading-position tracker
+  (require 'bookmark-plus-gt-preview)         ; consult jump reader + list preview
+  (require 'bookmark-plus-gt-tags)            ; tags and type columns in *Bookmark List*
+  (require 'bookmark-plus-gt-auto-update)     ; reading-position tracker
+  (require 'bookmark-plus-gt-browsel-tabs))   ; browser tabs as temporary URL bookmarks
 #+end_src
 
 =bookmark+= is a hard requirement of the whole package (the entry
@@ -44,6 +45,10 @@ Feature files:
   bookmarks carrying the =auto-update= property have their location
   refreshed as the file is read.  See "Auto-update bookmarks" below.
   - No extra requirements.
+- =bookmark-plus-gt-browsel-tabs= — every open browser tab exposed
+  as a temporary URL bookmark.  See "Browser tabs as temporary
+  bookmarks" below.
+  - Requires [[https://github.com/dmgerman/browsel][browsel]] (loaded and connected to at least one browser).
 
 Two things are always on when =bookmark-plus-gt= itself is loaded,
 because they are not features you can meaningfully opt out of:
@@ -56,6 +61,8 @@ because they are not features you can meaningfully opt out of:
   runtime state (=bmkp-last-as-first-bookmark-file=) to
   =bmkp-gt-state-file= instead of =custom-file=.  See "State
   persistence" below.
+- The =bookmark-bmenu-execute-deletions= advice that keeps point on
+  a surviving bookmark after =x=.  See "Post-delete point" below.
 
 * Commands
 
@@ -89,6 +96,12 @@ because they are not features you can meaningfully opt out of:
   =bmkp-gt-auto-update-enable-flag= is nil.
 
 - =bmkp-gt-auto-update-now= — force one refresh pass immediately.
+
+- =bmkp-gt-browsel-tabs-refresh= — rebuild the browsel-tab bookmarks
+  from live browser state.  Rarely needed by hand: the same refresh
+  runs automatically before =bookmark-bmenu-list=,
+  =bookmark-completing-read=, =bmkp-url-jump=, and
+  =bmkp-url-jump-other-window=.
 
 - =bmkp-gt-relocate-here= — point a bookmark (chosen by name) at the
   current buffer/point.  Preserves the name, tags, annotation,
@@ -131,6 +144,21 @@ Same characters appear as toggles in =*Bookmark List*= (=;= toggles
 the tags column, =@= toggles the type column), so the mapping
 =;=→tags, =@=→type is consistent across both interfaces.
 
+Long-name display.  Names longer than
+=bmkp-gt-jump-name-max-width= (default =50=) render in the
+minibuffer as =<head>…<tail>=, where <tail> is
+=bmkp-gt-jump-name-tail-keep= characters (default =10=).  The
+truncation shortens the candidate STRING (not just its display),
+so consult and marginalia size the annotation column from the
+truncated length — a single long candidate no longer widens the
+whole list.  The elided middle is not matchable by orderless /
+substring / flex; only the visible head and tail are.  The full
+untouched name is still recoverable from the
+=bmkp-gt-bookmark-name= text property attached to each candidate,
+so bookmark lookup, jump, and annotation display all resolve
+against the real name.  Set the cap to =nil= to disable
+truncation.
+
 Facet keys inside the minibuffer:
 
 - =M-t= — add a tag filter (completing-read from all tags).
@@ -158,6 +186,7 @@ group.  The prefix is =consult-narrow-key= (default =<=; set it to
 - =PREFIX D= — Desktop
 - =PREFIX S= — Snippet
 - =PREFIX g= — Magit
+- =PREFIX b= — Browser tab (added when =bookmark-plus-gt-browsel-tabs= is loaded)
 - =PREFIX ?= — help menu listing every char with its label
 - =PREFIX SPC= (or press the prefix again with no char) — clear
   narrowing
@@ -206,6 +235,33 @@ Both columns are on by default and toggleable:
 The type label comes from =bmkp-gt-jump-narrow= (same source as the
 consult minibuffer), so =@File=, =@Dired=, =@Web=, etc. mean the same
 thing everywhere.
+
+Face continuity.  The tag and type text is propertized with the
+row's own row-type =font-lock-face= (=bmkp-url=,
+=bmkp-local-file-without-region=, =bmkp-info=, ...) — the same
+face upstream applies to the whole =[marks, max-width]= range.
+That means any background from the row-type face flows
+continuously across name + padding + tag + type, so faces with a
+custom background do not stop mid-row and reveal the padding as a
+seam.
+
+Column widths.  The tags and type columns are capped by
+=bmkp-gt-bmenu-tags-max-width= (40) and =bmkp-gt-bmenu-type-max-width=
+(20).  The name column has its own cap,
+=bmkp-gt-bmenu-name-max-width= (default =50=): the tags/type start
+columns are computed from =min(widest-name, cap)=, and each row's
+name is smart-truncated in the buffer at render time so no row
+extends past the cap and every column aligns.  Truncation keeps
+the first =cap - tail-keep - 1= characters, inserts a single
+ellipsis (=…=), and keeps the last =bmkp-gt-bmenu-name-tail-keep=
+characters (default =10=).  The buffer text is rewritten but the
+row's =bmkp-full-record= and =bmkp-bookmark-name= text properties
+are preserved onto the truncated span, so =bookmark-bmenu-bookmark=
+and every other row lookup still returns the full name — only the
+rendered name is shortened.  Set the cap to =nil= to disable
+truncation and align on the true widest name (the pre-cap
+behavior).  The cap has no effect when both tags and type columns
+are hidden — the full name renders naturally.
 
 * Auto-update bookmarks
 
@@ -256,6 +312,79 @@ The toggle does not itself call =bookmark-save= (matches
 an =Auto-update: yes= line in the description, immediately above
 =Tags:=.  Bookmarks without the property render exactly as upstream.
 
+* Browser tabs as temporary bookmarks
+
+With =bookmark-plus-gt-browsel-tabs= loaded, every tab open in the
+connected browsers (via [[https://github.com/dmgerman/browsel][browsel]]) is exposed as a temporary URL
+bookmark.  The bookmark name is the tab URL — suffixed =<2>=,
+=<3>=, ... on collision — and the tab title is the annotation.
+Records carry the =bmkp-temp= property, so they are never written
+to =bookmark-default-file=.  A single tag equal to the browsel
+client name (=chrome=, =firefox=, ...) is attached to each record;
+the tag renders as =;chrome= / =;firefox= in the =*Bookmark List*=
+tags column and is filterable via bookmark-plus's tag machinery.
+
+Recognition and jump:
+
+- =bmkp-url-bookmark-p= is advised so browsel-tab bookmarks count
+  as URL bookmarks.  URL-only commands like =bmkp-url-jump= and
+  filters like =bmkp-bmenu-show-only-urls= pick them up
+  automatically.
+- A new entry is added to =bmkp-gt-jump-narrow= (when the preview
+  module is loaded): =(?b "Browser tab" bmkp-gt-browsel-tabs-jump)=.
+  So the type column in =*Bookmark List*= shows =Browser tab= for
+  these records, and the consult narrow key =b= (with the
+  =consult-narrow-key= prefix) filters =bmkp-gt-jump= to browsel
+  tabs.  Same for the minibuffer facet =@Browser tab=.
+- Jumping calls =browsel-focus-tab= with the tab's recorded id and
+  browser, and with =FOCUS-WINDOW= set so the browser's OS window
+  is raised.  If the tab has since closed or the browser is no
+  longer connected, the handler falls back to =browsel-browse-url=
+  with the recorded URL.
+- After focusing, the handler throws to =bookmark--jump-via= so
+  the standard post-handler chain (annotation display, auto-light,
+  fringe mark) does not run and steal focus back from the browser.
+
+Auto-refresh: the tab set is rebuilt from live browser state
+before any of the following functions runs, so you never see a
+stale list:
+
+- =bookmark-bmenu-list=
+- =bookmark-completing-read=
+- =bmkp-url-jump=
+- =bmkp-url-jump-other-window=
+
+=M-x bmkp-gt-browsel-tabs-refresh= forces a rebuild on demand.
+
+Browser selection: =bmkp-gt-browsel-tabs-browsers= is passed
+unchanged to =browsel-browser-tabs=.
+
+- =nil= (default) — poll every connected browser.
+- A string — that single browser only.
+- A list of strings — every browser in the list.
+
+Filtering: =bmkp-gt-browsel-tabs-filter= is applied per tab
+before it becomes a bookmark.
+
+- =nil= (default) — include every tab.
+- Regexp string — include a tab only if its URL matches.
+- Function — called with the tab plist; non-nil to include.
+
+Disconnection: if fetching the tab list fails (no browser
+connected, request timeout, etc.) a warning is issued and the
+browsel-tab set is left empty.  All other bookmarks keep working
+untouched; the next successful refresh re-populates.
+
+Delete-closes-tab: deleting a browsel-tab bookmark closes the
+underlying browser tab.  =bookmark-delete= is advised =:before= to
+call =browsel-close-tab= with the record's =browsel-id= and
+=browsel-browser= when the record is a browsel-tab bookmark.
+Covers both =M-x bookmark-delete= and the =*Bookmark List*=
+mark-and-execute flow (=d= then =x=).  Errors from the close call
+(tab already gone, browser disconnected) are demoted to a warning
+so the bookmark-side deletion still proceeds.  Non-browsel-tab
+bookmarks are untouched by this advice.
+
 * Annotations
 
 When marginalia is loaded, =bmkp-gt-bookmark-annotation= registers on
@@ -287,6 +416,23 @@ The allowlist is =bmkp-gt--persisted-vars= — currently just
 state file is auto-generated (a sequence of =setq= forms); safe to
 delete — it will be rewritten on next persist.
 
+* Post-delete point
+
+Upstream's =bookmark-bmenu-execute-deletions= (bound to =x=) does
+not reliably restore point after the buffer is rebuilt.  In the
+common case where the user marks the row they are on and presses
+=x=, upstream's fallback lands point in the header area or on the
+first bookmark rather than on the row after the one that was
+deleted.
+
+Bookmark-plus-gt advises the command =:around=.  Before calling
+upstream it records the nearest surviving bookmark — the next
+unmarked row below point, falling back to the previous unmarked
+row above — and after upstream returns it navigates to that row.
+Both the pre- and post-passes are wrapped in =condition-case=, so
+a failure inside the advice can never block the underlying
+deletion; it is logged as a warning and upstream still runs.
+
 * Preview errors
 
 Preview attempts (both paths) run under =condition-case=.  Failure
@@ -299,6 +445,8 @@ bookmark name.
 | Option                                   | Purpose                                     |
 |------------------------------------------+---------------------------------------------|
 | =bmkp-gt-preview-use-consult-flag=       | Toggle the consult reader (default =t=).    |
+| =bmkp-gt-jump-name-max-width=            | Cap on the visible name in `bmkp-gt-jump' (default =50=; =nil= = no cap). |
+| =bmkp-gt-jump-name-tail-keep=            | Characters kept at the tail of a display-truncated name in `bmkp-gt-jump' (default =10=). |
 | =bmkp-gt-jump-narrow=                    | Handler → group mapping (label + narrow key). |
 | =bmkp-gt-jump-group-by=                  | =nil= / =type= / =tag=.                     |
 | =bmkp-gt-jump-sort-by=                   | =mru= / =visits= / =alpha=.                 |
@@ -310,9 +458,13 @@ bookmark name.
 | =bmkp-gt-bmenu-tags-max-width=           | Cap on the tags column width (default =40=).  |
 | =bmkp-gt-bmenu-type-max-width=           | Cap on the type column width (default =20=).  |
 | =bmkp-gt-bmenu-column-gap=               | Space between adjacent columns (default =2=). |
+| =bmkp-gt-bmenu-name-max-width=           | Cap on the name column width when computing tags/type start (default =50=; =nil= = no cap). |
+| =bmkp-gt-bmenu-name-tail-keep=           | Characters kept at the tail of a smart-truncated name (default =10=). |
 | =bmkp-gt-auto-update-enable-flag=        | Auto-enable the tracking mode at load (default =t=). |
 | =bmkp-gt-auto-update-interval=           | Idle seconds between refresh ticks (default =60=). |
 | =bmkp-gt-state-file=                     | Where the state-file intercept persists (default =~/.emacs.d/bookmark-plus-gt-state.el=). |
+| =bmkp-gt-browsel-tabs-browsers=          | Browsers polled for tabs — =nil= / name / list of names (default =nil=). |
+| =bmkp-gt-browsel-tabs-filter=            | Per-tab filter — =nil= / URL regexp / predicate on the tab plist (default =nil=). |
 
 Customize group: =bookmark-plus-gt=.
 

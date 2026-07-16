@@ -273,5 +273,126 @@ tags column via `move-to-column ... t' inheritance."
           (kill-buffer bmkp-bmenu-buffer))))))
 
 
+;;; Name column cap and smart-truncation ------------------------------
+
+(ert-deftest bmkp-gt-test-tags/compute-name-end-caps-widest ()
+  "`bmkp-gt-bmenu--compute-name-end' clamps the widest name to the cap."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark
+       (make-string 200 ?a) buf))
+    (let ((bmkp-gt-bmenu-name-max-width  50)
+          (bmkp-sorted-alist              bookmark-alist))
+      ;; marks-width (4) + cap (50) = 54
+      (should (= (+ bmkp-bmenu-marks-width 50)
+                 (bmkp-gt-bmenu--compute-name-end))))))
+
+(ert-deftest bmkp-gt-test-tags/compute-name-end-uncapped-uses-widest ()
+  "With nil cap, `compute-name-end' returns marks-width + widest name."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark (make-string 200 ?a) buf))
+    (let ((bmkp-gt-bmenu-name-max-width  nil)
+          (bmkp-sorted-alist              bookmark-alist))
+      (should (= (+ bmkp-bmenu-marks-width 200)
+                 (bmkp-gt-bmenu--compute-name-end))))))
+
+(ert-deftest bmkp-gt-test-tags/truncate-long-name-renders-ellipsis-shape ()
+  "A long-name row shows `<head>…<tail>' when the tags/type columns are on."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark
+       (concat "HEAD" (make-string 200 ?x) "TAIL") buf))
+    (let ((bmkp-gt-bmenu-show-tags-flag  t)
+          (bmkp-gt-bmenu-show-type-flag  t)
+          (bmkp-gt-bmenu-name-max-width  50)
+          (bmkp-gt-bmenu-name-tail-keep  10))
+      (unwind-protect
+          (progn
+            (bookmark-bmenu-list)
+            (with-current-buffer bmkp-bmenu-buffer
+              (save-excursion
+                (goto-char (point-min))
+                (should (search-forward "…" nil t))
+                ;; The visible tail includes the original suffix.
+                (should (search-forward "TAIL" nil t)))))
+        (when (get-buffer bmkp-bmenu-buffer)
+          (kill-buffer bmkp-bmenu-buffer))))))
+
+(ert-deftest bmkp-gt-test-tags/truncate-preserves-full-name-property ()
+  "After truncation, `bookmark-bmenu-bookmark' still returns the full name."
+  (bmkp-gt-test-with-clean-bookmarks
+    (let ((full  (concat "HEAD" (make-string 200 ?x) "TAIL")))
+      (bmkp-gt-test-with-fixture-buffer buf "x"
+        (bmkp-gt-test--make-bookmark full buf))
+      (let ((bmkp-gt-bmenu-show-tags-flag  t)
+            (bmkp-gt-bmenu-show-type-flag  t)
+            (bmkp-gt-bmenu-name-max-width  50))
+        (unwind-protect
+            (progn
+              (bookmark-bmenu-list)
+              (with-current-buffer bmkp-bmenu-buffer
+                (save-excursion
+                  (goto-char (point-min))
+                  (search-forward "HEAD")
+                  (forward-line 0)
+                  (forward-char bmkp-bmenu-marks-width)
+                  (should (equal full (bookmark-bmenu-bookmark))))))
+          (when (get-buffer bmkp-bmenu-buffer)
+            (kill-buffer bmkp-bmenu-buffer)))))))
+
+(ert-deftest bmkp-gt-test-tags/truncate-no-op-when-cap-nil ()
+  "A nil `bmkp-gt-bmenu-name-max-width' means no truncation."
+  (bmkp-gt-test-with-clean-bookmarks
+    (let ((long  (concat "HEAD" (make-string 100 ?x) "TAIL")))
+      (bmkp-gt-test-with-fixture-buffer buf "x"
+        (bmkp-gt-test--make-bookmark long buf))
+      (let ((bmkp-gt-bmenu-show-tags-flag  t)
+            (bmkp-gt-bmenu-show-type-flag  t)
+            (bmkp-gt-bmenu-name-max-width  nil))
+        (unwind-protect
+            (progn
+              (bookmark-bmenu-list)
+              (with-current-buffer bmkp-bmenu-buffer
+                (save-excursion
+                  (goto-char (point-min))
+                  (should-not (search-forward "…" nil t)))))
+          (when (get-buffer bmkp-bmenu-buffer)
+            (kill-buffer bmkp-bmenu-buffer)))))))
+
+
+;;; Row-face continuity across tag/type columns -----------------------
+
+(ert-deftest bmkp-gt-test-tags/tag-text-shares-row-font-lock-face ()
+  "When the name column has a `font-lock-face', the tag text uses the same.
+Skipped implicitly if the name column carries no face in the
+batch environment — the point of the assertion is that whatever
+face is present on the name is also present on the tag text."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "row-plain" buf))
+    (bmkp-add-tags "row-plain" '("mytag") 'NO-UPDATE-P)
+    (let ((bmkp-gt-bmenu-show-tags-flag  t)
+          (bmkp-gt-bmenu-show-type-flag  t))
+      (unwind-protect
+          (progn
+            (bookmark-bmenu-list)
+            (with-current-buffer bmkp-bmenu-buffer
+              (bmkp-bmenu-goto-bookmark-named "row-plain")
+              (forward-line 0)
+              (let ((name-face  (get-text-property
+                                 (+ (line-beginning-position)
+                                    bmkp-bmenu-marks-width 3)
+                                 'font-lock-face)))
+                (when name-face
+                  (goto-char (line-beginning-position))
+                  (search-forward ";mytag" (line-end-position) t)
+                  (should (eq name-face
+                              (get-text-property (1- (point))
+                                                 'font-lock-face)))))))
+        (when (get-buffer bmkp-bmenu-buffer)
+          (kill-buffer bmkp-bmenu-buffer))))))
+
+
 (provide 'bmkp-gt-test-tags)
 ;;; bmkp-gt-test-tags.el ends here

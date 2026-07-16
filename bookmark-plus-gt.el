@@ -382,5 +382,79 @@ Signals an error when no bookmark points at this file/buffer."
            (if set-auto-update " (auto-update ON)" "")))
 
 
+;;; Preserve point across `bookmark-bmenu-execute-deletions' ------------
+;;
+;; Upstream's `bookmark-bmenu-execute-deletions' (bookmark+-bmu.el) sets
+;; `o-str' to the bookmark name at point only when the current line is
+;; NOT itself flagged/marked for deletion.  In the common case where the
+;; user marks the row they are on (`d' then `x'), `o-str' is nil and the
+;; fallback branch runs `(goto-char o-point) (beginning-of-line)'.
+;; After a full buffer erase + re-render inside a `save-excursion',
+;; that fallback is unreliable — point often lands on the header area
+;; or the first bookmark rather than the row after the one that was
+;; deleted.
+;;
+;; This advice records the nearest surviving bookmark (below point
+;; first, then above) before calling upstream and navigates to it
+;; after.  Both passes are wrapped in `condition-case' so any failure
+;; here can never block the underlying deletion.
+
+(declare-function bmkp-looking-at-p         "bookmark+-bmu")
+(declare-function bmkp-bmenu-goto-bookmark-named "bookmark+-bmu")
+
+(defun bmkp-gt--find-non-marked-row (direction)
+  "Search DIRECTION lines from point for the first non-marked bookmark row.
+DIRECTION is +1 (down) or -1 (up).  Returns the row's bookmark
+name, or nil.  A row is `non-marked' when its first column is
+neither `D' nor `>' — i.e. it will not be affected by
+`bookmark-bmenu-execute-deletions'."
+  (save-excursion
+    (let ((found  nil))
+      (while (and (not found) (zerop (forward-line direction)))
+        (unless (bmkp-looking-at-p "^[D>]")
+          (let ((name  (bookmark-bmenu-bookmark)))
+            (when (and name (not (string-empty-p name)))
+              (setq found name)))))
+      found)))
+
+(defun bmkp-gt--find-post-delete-target ()
+  "Return the name of the nearest surviving bookmark around point.
+Looks below first (next non-marked row), then above (previous
+non-marked row).  Returns nil when no unmarked bookmark row
+remains in the buffer."
+  (or (bmkp-gt--find-non-marked-row  1)
+      (bmkp-gt--find-non-marked-row -1)))
+
+(defun bmkp-gt--execute-deletions-around (orig-fn &rest args)
+  "`:around' advice on `bookmark-bmenu-execute-deletions'.
+Records the nearest non-marked bookmark before the deletion (below
+point first, then above) and, after ORIG-FN returns, navigates to
+that bookmark.  Errors in either the pre or the post pass are
+demoted to a warning so ORIG-FN always runs and its return value
+is passed through unchanged."
+  (let ((target  (condition-case err
+                     (bmkp-gt--find-post-delete-target)
+                   (error
+                    (display-warning
+                     'bookmark-plus-gt
+                     (format "post-delete target search failed: %s"
+                             (error-message-string err))
+                     :warning)
+                    nil))))
+    (prog1 (apply orig-fn args)
+      (when target
+        (condition-case err
+            (bmkp-bmenu-goto-bookmark-named target)
+          (error
+           (display-warning
+            'bookmark-plus-gt
+            (format "post-delete navigation to %S failed: %s"
+                    target (error-message-string err))
+            :warning)))))))
+
+(advice-add 'bookmark-bmenu-execute-deletions
+            :around #'bmkp-gt--execute-deletions-around)
+
+
 (provide 'bookmark-plus-gt)
 ;;; bookmark-plus-gt.el ends here

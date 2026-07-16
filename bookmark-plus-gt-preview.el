@@ -142,6 +142,23 @@ Used by `bmkp-gt-list-preview-mode'.  The default opens the preview
 in some other window without stealing focus from `*Bookmark List*'."
   :type '(cons function alist) :group 'bookmark-plus-gt)
 
+(defcustom bmkp-gt-jump-name-max-width 50
+  "Cap on the visible width of a bookmark name in `bmkp-gt-jump'.
+Non-nil (positive integer) — names longer than this cap render
+in the minibuffer as `<head>…<tail>' where <tail> is
+`bmkp-gt-jump-name-tail-keep' characters.  Only the DISPLAY is
+truncated: the underlying candidate string still carries every
+character, so orderless and other matchers see the full name.
+nil — no truncation."
+  :type '(choice (const :tag "No cap" nil) (integer :tag "Max chars"))
+  :group 'bookmark-plus-gt)
+
+(defcustom bmkp-gt-jump-name-tail-keep 10
+  "Number of characters kept at the tail of a truncated name in `bmkp-gt-jump'.
+Only meaningful when `bmkp-gt-jump-name-max-width' is non-nil."
+  :type 'integer
+  :group 'bookmark-plus-gt)
+
 (defcustom bmkp-gt-jump-narrow
   '((?f "File"           bookmark-default-handler)
     (?d "Dired"          bmkp-jump-dired
@@ -342,6 +359,30 @@ contains BM's handler and returns its NAME field (e.g. \"File\",
              when (memq handler handlers)
              return name)))
 
+(defun bmkp-gt-jump--truncate-name (name)
+  "Return NAME smart-truncated to `bmkp-gt-jump-name-max-width' as a real string.
+When NAME exceeds the cap, returns `<head>…<tail>' where <tail>
+is `bmkp-gt-jump-name-tail-keep' characters.  The returned string
+is shorter than NAME (unlike a display-only trick), so consult and
+marginalia size the annotation column from the truncated length,
+not the underlying full-name length.
+
+Trade-off: orderless / substring / flex can only match the visible
+head and tail characters — not the elided middle.  The full,
+untouched name is still recoverable from the caller-attached
+`bmkp-gt-bookmark-name' text property on the candidate."
+  (let ((cap  bmkp-gt-jump-name-max-width))
+    (if (or (null cap) (<= (length name) cap))
+        name
+      (let* ((tail-keep  (max 0 bmkp-gt-jump-name-tail-keep))
+             (ellipsis   "…")
+             (head-keep  (- cap tail-keep (string-width ellipsis))))
+        (if (<= head-keep 0)
+            name
+          (concat (substring name 0 head-keep)
+                  ellipsis
+                  (substring name (- (length name) tail-keep))))))))
+
 (defun bmkp-gt-jump-candidate-default (bm narrow-alist)
   "Default candidate formatter for `bmkp-gt-jump'.
 
@@ -360,13 +401,14 @@ All parts carry the text properties required by `consult--read'
 \(see `bmkp-gt-jump-candidate-format-function' for the contract\):
 `bmkp-gt-bookmark-name' and `consult--type'."
   (let* ((name      (car bm))
+         (visible   (bmkp-gt-jump--truncate-name name))
          (tags      (bookmark-prop-get name 'tags))
          (raw-tags  (when tags (bmkp-gt--tags-segment-raw tags)))
          (type-name (bmkp-gt-jump-candidate-type-name bm))
          (type-tok  (when type-name (concat "@" type-name)))
          (type-char (bmkp-gt-jump-candidate-type-char bm narrow-alist))
          (hidden    (string-join (delq nil (list type-tok raw-tags)) " "))
-         (head      (propertize name
+         (head      (propertize visible
                                 'bmkp-gt-bookmark-name name
                                 'consult--type        type-char)))
     (if (string-empty-p hidden)

@@ -313,5 +313,108 @@ touch `bmkp-gt-state-file' — it delegates to the original."
                           (symbol-value 'bmkp-gt-test--roundtrip-var)))))))
 
 
+;;; Post-delete point advice on `bookmark-bmenu-execute-deletions' -----
+
+(ert-deftest bmkp-gt-test-execute-deletions/advice-installed ()
+  "`bmkp-gt--execute-deletions-around' is `:around' on the delete command."
+  (should (advice-member-p 'bmkp-gt--execute-deletions-around
+                           'bookmark-bmenu-execute-deletions)))
+
+(defun bmkp-gt-test--make-bmenu-with-marks (rows)
+  "Populate `bookmark-alist' with ROWS (list of (name . mark)).
+`mark' is a character (?D, ?>, or ?\\s) written in column 0 of
+the corresponding bookmark row.  Renders `*Bookmark List*' with
+the tag/type columns off so the row structure is predictable.
+Uses `bmkp-bmenu-goto-bookmark-named' to navigate to each row,
+so header text can't be accidentally clobbered by a substring
+match on the bookmark name.  Returns the buffer."
+  (bmkp-gt-test-with-fixture-buffer buf "x"
+    (dolist (row rows)
+      (bmkp-gt-test--make-bookmark (car row) buf)))
+  (let ((bmkp-gt-bmenu-show-tags-flag  nil)
+        (bmkp-gt-bmenu-show-type-flag  nil))
+    (bookmark-bmenu-list))
+  (with-current-buffer bmkp-bmenu-buffer
+    (let ((inhibit-read-only  t))
+      (dolist (row rows)
+        (bmkp-bmenu-goto-bookmark-named (car row))
+        (forward-line 0)
+        (unless (eq ?\s (cdr row))
+          (delete-char 1)
+          (insert-char (cdr row))))))
+  bmkp-bmenu-buffer)
+
+(ert-deftest bmkp-gt-test-execute-deletions/find-non-marked-row-goes-down ()
+  "`bmkp-gt--find-non-marked-row' walks forward past marked rows."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test--make-bmenu-with-marks
+     '(("aa" . ?D) ("bb" . ?D) ("cc" . ?\s)))
+    (unwind-protect
+        (with-current-buffer bmkp-bmenu-buffer
+          (bmkp-bmenu-goto-bookmark-named "aa")
+          (forward-line 0)
+          (should (equal "cc" (bmkp-gt--find-non-marked-row 1))))
+      (kill-buffer bmkp-bmenu-buffer))))
+
+(ert-deftest bmkp-gt-test-execute-deletions/find-non-marked-row-goes-up ()
+  "`bmkp-gt--find-non-marked-row' walks backward past marked rows."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test--make-bmenu-with-marks
+     '(("aa" . ?\s) ("bb" . ?D) ("cc" . ?D)))
+    (unwind-protect
+        (with-current-buffer bmkp-bmenu-buffer
+          (bmkp-bmenu-goto-bookmark-named "cc")
+          (forward-line 0)
+          (should (equal "aa" (bmkp-gt--find-non-marked-row -1))))
+      (kill-buffer bmkp-bmenu-buffer))))
+
+(ert-deftest bmkp-gt-test-execute-deletions/find-post-delete-target-prefers-below ()
+  "`bmkp-gt--find-post-delete-target' looks below before above."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test--make-bmenu-with-marks
+     '(("above" . ?\s) ("middle" . ?D) ("below" . ?\s)))
+    (unwind-protect
+        (with-current-buffer bmkp-bmenu-buffer
+          (bmkp-bmenu-goto-bookmark-named "middle")
+          (forward-line 0)
+          (should (equal "below" (bmkp-gt--find-post-delete-target))))
+      (kill-buffer bmkp-bmenu-buffer))))
+
+(ert-deftest bmkp-gt-test-execute-deletions/find-post-delete-target-nil-when-alone ()
+  "`bmkp-gt--find-post-delete-target' returns nil when every row is marked."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test--make-bmenu-with-marks
+     '(("aa" . ?D) ("bb" . ?D) ("cc" . ?D)))
+    (unwind-protect
+        (with-current-buffer bmkp-bmenu-buffer
+          (bmkp-bmenu-goto-bookmark-named "bb")
+          (forward-line 0)
+          (should-not (bmkp-gt--find-post-delete-target)))
+      (kill-buffer bmkp-bmenu-buffer))))
+
+(ert-deftest bmkp-gt-test-execute-deletions/advice-swallows-target-error ()
+  "An error in the pre-pass is demoted; ORIG-FN still runs and returns."
+  (cl-letf (((symbol-function 'bmkp-gt--find-post-delete-target)
+             (lambda () (error "target search boom"))))
+    ;; ORIG-FN's contract: return non-nil sentinel when reached.
+    (cl-letf (((symbol-function 'bookmark-bmenu-execute-deletions--orig)
+               (lambda (&rest _) 'called)))
+      ;; Rebuild the advised function on top of the stub so `apply orig-fn'
+      ;; hits our stub, not the real command.
+      (let ((got  (bmkp-gt--execute-deletions-around
+                   (lambda (&rest _) 'reached))))
+        (should (eq 'reached got))))))
+
+(ert-deftest bmkp-gt-test-execute-deletions/advice-swallows-navigation-error ()
+  "An error in the post-pass is demoted; the return value of ORIG-FN wins."
+  (cl-letf (((symbol-function 'bmkp-gt--find-post-delete-target)
+             (lambda () "any-name"))
+            ((symbol-function 'bmkp-bmenu-goto-bookmark-named)
+             (lambda (_) (error "nav boom"))))
+    (let ((got  (bmkp-gt--execute-deletions-around
+                 (lambda (&rest _) 'orig-result))))
+      (should (eq 'orig-result got)))))
+
+
 (provide 'bmkp-gt-test-entry)
 ;;; bmkp-gt-test-entry.el ends here

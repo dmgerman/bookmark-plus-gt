@@ -2,6 +2,9 @@
 
 ;;; Code:
 
+(require 'browsel-stub)                 ; Provides the `browsel' feature so
+                                        ; `bookmark-plus-gt-browsel-tabs' loads
+                                        ; without pulling in the real module.
 (require 'bmkp-gt-test-helper)
 
 (dolist (f (directory-files (file-name-directory load-file-name) t
