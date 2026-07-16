@@ -479,6 +479,35 @@ match on the bookmark name.  Returns the buffer."
       (should (equal '(t) (bmkp-gt-sort-by-load-order (car blist-b) (car blist-a)))))))
 
 
+;;; Creation-time secondary comparer -----------------------------------
+
+(ert-deftest bmkp-gt-test-creation/comparer-defined ()
+  "`bmkp-gt-creation-oldest-cp' is defined."
+  (should (fboundp 'bmkp-gt-creation-oldest-cp)))
+
+(ert-deftest bmkp-gt-test-creation/earlier-created-sorts-first ()
+  "The earlier `created' timestamp sorts first (ascending by age)."
+  ;; `bmkp-float-time' accepts a (HIGH LOW USEC PSEC) time list; simulate.
+  (let ((b-old  (list "old"   '(created 27000 0 0 0)))
+        (b-new  (list "new"   '(created 27100 0 0 0))))
+    (should (equal '(t)   (bmkp-gt-creation-oldest-cp b-old b-new)))
+    (should (equal '(nil) (bmkp-gt-creation-oldest-cp b-new b-old)))))
+
+(ert-deftest bmkp-gt-test-creation/equal-timestamps-tie ()
+  "Equal `created' timestamps return nil (tie, fall through)."
+  (let ((b1  (list "a" '(created 27000 0 0 0)))
+        (b2  (list "b" '(created 27000 0 0 0))))
+    (should (null (bmkp-gt-creation-oldest-cp b1 b2)))))
+
+(ert-deftest bmkp-gt-test-creation/missing-created-returns-nil ()
+  "If either bookmark lacks `created', the comparer returns nil."
+  (let ((with-c    (list "c" '(created 27000 0 0 0)))
+        (without-c (list "n" '(filename . "/tmp/x"))))
+    (should (null (bmkp-gt-creation-oldest-cp with-c   without-c)))
+    (should (null (bmkp-gt-creation-oldest-cp without-c with-c)))
+    (should (null (bmkp-gt-creation-oldest-cp without-c without-c)))))
+
+
 ;;; Overwrite-confirm guard --------------------------------------------
 
 (ert-deftest bmkp-gt-test-safety/overwrite-confirm-set ()

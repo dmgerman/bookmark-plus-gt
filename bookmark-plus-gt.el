@@ -528,6 +528,32 @@ Returns BLIST unchanged so `bookmark-load's contract is preserved."
 (advice-add 'bookmark-load :filter-return #'bmkp-gt--stamp-load-index)
 
 ;;;###autoload
+(defun bmkp-gt-creation-oldest-cp (b1 b2)
+  "Comparer: bookmark created earlier sorts first (ascending by age).
+Reads the upstream `created' timestamp on each record.  Returns:
+  `(t)'   — B1 was created strictly before B2
+  `(nil)' — B2 was created strictly before B1
+  nil     — either bookmark has no `created' entry, or the two
+            timestamps are equal (tie, fall through)
+
+Intended as the second predicate after `bmkp-gt-sort-by-load-order':
+within a single load, bookmarks from the file are ordered oldest
+first.  Bookmarks without a `created' entry (older bookmarks predate
+the field, or the entry has been stripped) fall through to whatever
+final comparer bookmark-plus chains underneath — typically
+`bmkp-alpha-p'."
+  (setq b1  (bmkp-get-bookmark b1)
+        b2  (bmkp-get-bookmark b2))
+  (let ((t1  (bookmark-prop-get b1 'created))
+        (t2  (bookmark-prop-get b2 'created)))
+    (when (and t1 t2)
+      (let ((f1  (bmkp-float-time t1))
+            (f2  (bmkp-float-time t2)))
+        (cond ((< f1 f2) '(t))
+              ((> f1 f2) '(nil))
+              (t         nil))))))
+
+;;;###autoload
 (defun bmkp-gt-sort-by-load-order (b1 b2)
   "Comparer: bookmarks from a more-recent `bookmark-load' sort first.
 Reads `bmkp-gt-load-index' from each bookmark record.  Higher index

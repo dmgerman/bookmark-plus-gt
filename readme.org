@@ -442,6 +442,14 @@ deletion; it is logged as a warning and upstream still runs.
 * Same-named bookmarks
 
 Bookmark+ can hold several bookmarks with the same literal name.
+
+*To create a new bookmark whose name matches an existing one, use
+=C-u M-x bookmark-set=* (Lisp equivalent: =(bookmark-set NAME '(4) nil)=).
+Without the prefix argument, =bookmark-set= does NOT create a new
+bookmark — it overwrites the existing record in place and copies
+that record's =tags= and =annotation= onto the update (see "Merge
+risk on =bookmark-set=" below).
+
 Two paths to get there:
 
 - =C-u M-x bookmark-set= at a new location with the same name.
@@ -498,23 +506,34 @@ Bookmark files form a *stack*: the file loaded most recently is
 on top, previously-loaded files are below.  Bookmark-plus does
 not track load order out of the box.  Bookmark-plus-gt tags every
 loaded bookmark with a `bmkp-gt-load-index' property and provides
-the comparer =bmkp-gt-sort-by-load-order=.  The user opts in with
+the primary comparer =bmkp-gt-sort-by-load-order= plus the
+secondary comparer =bmkp-gt-creation-oldest-cp= (ascending by the
+upstream `created' timestamp).  The user chains them via
+=bmkp-sort-comparer='s list-of-predicates form:
 
 #+begin_src emacs-lisp
-(setq bmkp-sort-comparer #'bmkp-gt-sort-by-load-order)
+(setq bmkp-sort-comparer
+      '((bmkp-gt-sort-by-load-order bmkp-gt-creation-oldest-cp)
+        bmkp-alpha-p))
 #+end_src
 
-Under this comparer, the most-recently-loaded file's bookmarks
-sort first, then the next-most-recent, and so on.  The initial
-auto-loaded bookmark file gets index =1= (the auto-load path
-goes through `bookmark-load' and picks up our advice); a
-subsequent =M-x bookmark-load= gets index =2=; and so on.
-Bookmarks created in-session via =bookmark-set= carry no index —
-the comparer treats them as `most-positive-fixnum' so they sort
-at the top with each other.  Ties (same load-index) fall through
-to whatever comparer bookmark-plus is chaining underneath, so
-you can layer another sort (typically alphabetical) as the
-tie-breaker.
+- =bmkp-gt-sort-by-load-order= (first predicate).  The
+  most-recently-loaded file's bookmarks sort first, then the
+  next-most-recent, and so on.  The initial auto-loaded bookmark
+  file gets index =1= (the auto-load path goes through
+  =bookmark-load= and picks up our advice); a subsequent =M-x
+  bookmark-load= gets index =2=; and so on.  Bookmarks created
+  in-session via =bookmark-set= carry no index — the comparer
+  treats them as =most-positive-fixnum= so they sort at the top
+  with each other.  Ties (same load-index) fall through to the
+  next predicate.
+- =bmkp-gt-creation-oldest-cp= (second predicate).  Within a
+  single load, the bookmark created earlier sorts first
+  (ascending by the =created= timestamp).  Bookmarks that lack
+  the timestamp — created by an older bookmark-plus version, or
+  the entry has been stripped — return nil and fall through.
+- =bmkp-alpha-p= (final predicate).  Standard alphabetical tie-
+  breaker; catches any pair that neither of the above resolved.
 
 Deterministic suffix numbering.  Bookmark-plus's `bookmark-load'
 assigns suffixes deterministically: for each incoming name that
