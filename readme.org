@@ -443,8 +443,8 @@ deletion; it is logged as a warning and upstream still runs.
 
 Bookmark+ can hold several bookmarks with the same literal name.
 
-*To create a new bookmark whose name matches an existing one, use
-=C-u M-x bookmark-set=* (Lisp equivalent: =(bookmark-set NAME '(4) nil)=).
+*To create a new bookmark whose name matches an existing one*, use
+=C-u M-x bookmark-set= (Lisp equivalent: =(bookmark-set NAME '(4) nil)=).
 Without the prefix argument, =bookmark-set= does NOT create a new
 bookmark — it overwrites the existing record in place and copies
 that record's =tags= and =annotation= onto the update (see "Merge
