@@ -6,10 +6,24 @@ Bookmark+ itself is not modified.
 
 * Install
 
+First, install bookmark-plus. You have to download the files from emacsWiki
+https://www.emacswiki.org/emacs/BookmarkPlus
+(do not use the github fork at https://github.com/emacswiki/bookmark-plus,
+it is outdated). Place those files in its own directory and use package
+to load them
+
+#+begin_src emacs-lisp   :exports both
+(use-package bookmark+
+  :load-path "~/.emacs.d/modules/bookmark-plus"
+  )
+#+end_src
+
+bookmark-plus has a lot of configurable features. Some of these are set by
+bookmark-plus-gt in order it to properly work.
+
 #+begin_src emacs-lisp
 (use-package bookmark-plus-gt
   :load-path "~/.emacs.d/modules/bookmark-plus-gt"
-  :straight nil
   :after bookmark+
   :config
   ;; Optional features — comment out any you do not want.
@@ -19,13 +33,9 @@ Bookmark+ itself is not modified.
   (require 'bookmark-plus-gt-browsel-tabs))   ; browser tabs as temporary URL bookmarks
 #+end_src
 
-=bookmark+= is a hard requirement of the whole package (the entry
-point loads it before anything else); it is not repeated per
-feature below.
+Optional features:
 
-Feature files:
-
-- =bookmark-plus-gt-jump= — the =consult=-backed jump reader
+- =Bookmark-plus-gt-jump= — the =consult=-backed jump reader
   (=bmkp-gt-jump= and its variants) plus =bmkp-gt-list-preview-mode=
   for =*Bookmark List*=.  See "Minibuffer filtering" and
   "Annotations" below.
