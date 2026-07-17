@@ -554,6 +554,31 @@ Same session, same load order → same suffixes; suffixes are
 persisted verbatim when bookmarks are saved, so subsequent loads
 see them as the literal names.
 
+* File rename tracking
+
+When a file or directory is renamed through Emacs — =dired= =R=,
+=rename-visited-file=, or any Lisp call to =rename-file= — bookmarks
+whose target is the renamed path are rewritten to point at the new
+path.  Directory renames also carry over: any bookmark whose target
+lives *under* the renamed directory has its path rewritten with the
+new directory prefix.
+
+Non-file bookmarks (URL, EWW, and anything else whose filename slot
+holds =bmkp-non-file-filename=) are skipped.  Renames performed
+*outside* Emacs — shell =mv=, Finder, =git mv= — are not tracked;
+file-notify watches would be needed for that and are much heavier.
+
+Implemented as always-on =:after= advice on =rename-file=
+(=bmkp-gt-on-file-rename=).  The OS-level rename has already
+succeeded by the time the advice runs, so it never signals: two
+=condition-case= traps (one per bookmark, one outer) demote any
+error to a =message= so a successful rename cannot appear to fail.
+
+On success a summary is echoed:
+=bmkp-gt: updated N bookmark(s) after rename of PATH=.
+=bookmark-alist-modification-count= is incremented so the change is
+picked up on the next save.
+
 * Preview errors
 
 Preview attempts (both paths) run under =condition-case=.  Failure

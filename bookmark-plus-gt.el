@@ -527,6 +527,70 @@ Returns BLIST unchanged so `bookmark-load's contract is preserved."
 
 (advice-add 'bookmark-load :filter-return #'bmkp-gt--stamp-load-index)
 
+
+;;; File-rename tracking (always-on) ----------------------------------
+;;
+;; When a file or directory is renamed through Emacs (dired `R',
+;; `rename-visited-file', any Lisp call to `rename-file'), rewrite
+;; every bookmark whose `filename' equals the renamed path, or lives
+;; under it in the directory-rename case, to the new path.
+;;
+;; Installed as `:after' advice on `rename-file'.  The OS-level
+;; rename has already succeeded by the time we run, so the advice
+;; must NEVER signal back to the caller — otherwise a successful
+;; rename would look like a failure.  Two `condition-case' traps
+;; guard against that: a per-bookmark inner trap so one bad record
+;; does not stop the sweep, and an outer trap so nothing escapes.
+;;
+;; Non-file bookmarks (URL / EWW / etc., identified by
+;; `bmkp-non-file-filename') are skipped.  Renames performed outside
+;; Emacs (shell, Finder, `git mv') are not covered — those would
+;; need file-notify watches, which are much heavier.
+
+(defvar bmkp-non-file-filename)         ; In `bookmark+-1.el'.
+
+(defun bmkp-gt-on-file-rename (oldname newname &rest _)
+  "Update bookmarks whose filename equals or lives under OLDNAME to NEWNAME.
+Never signals: any internal error is caught and logged.  Runs as
+`:after' advice on `rename-file'."
+  (condition-case err
+      (save-match-data
+        (let* ((old      (expand-file-name oldname))
+               (new      (expand-file-name newname))
+               (old-dir  (file-name-as-directory old))
+               (new-dir  (file-name-as-directory new))
+               (dir-p    (file-directory-p new))
+               (changed  0))
+          (dolist (bm bookmark-alist)
+            (condition-case per-bm
+                (let ((f (bookmark-get-filename bm)))
+                  (when (and f
+                             (stringp f)
+                             (not (string= f bmkp-non-file-filename)))
+                    (let ((abs (expand-file-name f)))
+                      (cond
+                       ((string= abs old)
+                        (bookmark-set-filename bm new)
+                        (cl-incf changed))
+                       ((and dir-p (string-prefix-p old-dir abs))
+                        (bookmark-set-filename
+                         bm (concat new-dir (substring abs (length old-dir))))
+                        (cl-incf changed))))))
+              (error
+               (message "bmkp-gt-on-file-rename: skipped %S: %s"
+                        (car-safe bm) (error-message-string per-bm)))))
+          (when (> changed 0)
+            (setq bookmark-alist-modification-count
+                  (1+ bookmark-alist-modification-count))
+            (message "bmkp-gt: updated %d bookmark(s) after rename of %s"
+                     changed (abbreviate-file-name old)))))
+    (error
+     (message "bmkp-gt-on-file-rename: failed (%s)"
+              (error-message-string err)))))
+
+(advice-add 'rename-file :after #'bmkp-gt-on-file-rename)
+
+
 ;;;###autoload
 (defun bmkp-gt-creation-oldest-cp (b1 b2)
   "Comparer: bookmark created earlier sorts first (ascending by age).
