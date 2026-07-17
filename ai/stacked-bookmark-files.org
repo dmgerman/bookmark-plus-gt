@@ -1,0 +1,286 @@
+#+TITLE: Stacked bookmark files — design plan
+#+STARTUP: overview
+
+* Purpose
+
+Give =bookmark-plus-gt= a genuine notion of "which bk file did this
+bookmark come from?", and expose the loaded bk files as a *stack* the
+user can push, pop, unload, and reload — while keeping every existing
+=bookmark-plus= workflow (single =bookmark-alist=, single
+=bmkp-current-bookmark-file= save sink) intact.
+
+* Motivation
+
+Today, when the user loads several bk files, the layered model is
+weaker than the interactive experience suggests:
+
+- =bookmark-alist= is a single flat list.  Records carry no origin —
+  once a bk file's records have been added, nothing associates them
+  with the file they came from.
+- =bmkp-current-bookmark-file= is a single global naming "the file
+  we save to next."  It does not describe the stack; it just names
+  the save sink.
+- The only file-boundary operations =bookmark-plus= offers are
+  additive merge (=M-x bookmark-load=) and full replace (=C-u M-x
+  bookmark-load=).  There is no per-file removal, no per-file reload.
+- =bookmark-plus-gt= already stamps =bmkp-gt-load-index= (a monotonic
+  integer) on every loaded record, so load *order* is recoverable.
+  Load *origin* (the file path) is not.
+
+Concrete scenario that today has no clean answer:
+
+#+begin_example
+  1. Emacs starts.  Default bk file A is auto-loaded.
+  2. `M-x bookmark-load B'  — user wants B's bookmarks in addition to A.
+  3. User is done with B and wants to unload it.
+  4. `M-x bookmark-load C'  — user wants C on top of A.
+#+end_example
+
+Step 3 has no primitive.  Step 4 without step 3 leaves A + B + C
+merged in the alist — B's records survive silently and get saved back
+into A's file the next time =bookmark-save= runs.
+
+* Model: the stack
+
+Think of loaded bk files as a *stack*, LIFO by load order:
+
+- The initial auto-loaded file (typically =bookmark-default-file=) is
+  the bottom of the stack.
+- Each =bookmark-load FILE= (no prefix) *pushes* FILE onto the stack.
+- =bookmark-load FILE OVERWRITE= (=C-u=) *resets* the stack to just
+  FILE (matches upstream's existing overwrite behavior).
+- Unload removes one entry from the stack — the top (=pop=), or any
+  entry by name.
+- Reload = unload + re-push, useful when the on-disk file has changed
+  externally or when in-memory records have drifted.
+
+Every record in =bookmark-alist= carries an origin file (the entry it
+belongs to on the stack).  Records created in-session by
+=bookmark-set= are stamped with =bmkp-current-bookmark-file= — the
+file =bookmark-save= will write them to — so no record is ever
+"unowned."
+
+* On-disk representation: the origin stamp is transient
+
+The origin stamp is a *runtime* attribute, not persisted:
+
+- On load, every incoming record is stamped fresh with the file it
+  came from.  If the on-disk copy already carries a stale stamp
+  (from a prior version of =bookmark-plus-gt= that persisted it), it
+  is overwritten with the correct current path.
+- On save, =bmkp-gt-load-file= is stripped from every record before
+  serialization.  The same treatment is extended to
+  =bmkp-gt-load-index=, which today *is* persisted — that persistence
+  was mistaken: indices are per-session counters, so a value carried
+  over from a previous session has no meaning in the new one.
+- The "already carries an index, don't overwrite" guard in the
+  current stamping code is dropped.  Every session starts fresh.
+
+Consequence: bk files stay clean of internal bookkeeping, files
+survive renames on disk without a rewrite pass (the next load stamps
+the new path), and there is no migration burden for existing users.
+
+* Implementation sketch
+
+All changes live in =bookmark-plus-gt.el= (always-on layer).
+
+** Origin stamp on load
+
+Replace the existing =:filter-return= advice on =bookmark-load=
+(=bmkp-gt--stamp-load-index=) with an =:around= advice that:
+
+- Captures the =FILE= arg.
+- Runs the original =bookmark-load=.
+- On the returned freshly-loaded records: increment
+  =bmkp-gt--load-counter=, stamp each record with the new counter as
+  =bmkp-gt-load-index= AND with the absolute file path as
+  =bmkp-gt-load-file=.  Unconditional — no "already indexed" guard.
+- Returns the record list unchanged so =bookmark-load='s contract is
+  preserved.
+
+** Origin stamp on =bookmark-set=
+
+Add =:after= advice on =bookmark-store= (the low-level record
+inserter that =bookmark-set= and friends funnel through).  When it
+returns, locate the just-inserted record in =bookmark-alist= (by
+name) and stamp its =bmkp-gt-load-file= to =bmkp-current-bookmark-file=.
+
+Rationale for advising =bookmark-store= (not =bookmark-set=): every
+path that creates a bookmark — interactive =bookmark-set=, EWW /
+=w3m= / PDF handlers, org-heading captures, automated setters — ends
+up at =bookmark-store=.  One advice covers them all.
+
+** Origin stamp stripped on save
+
+Add =:around= advice on =bookmark-write-file= that, for the duration
+of the wrapped call, binds =bookmark-alist= to a copy in which every
+record has =bmkp-gt-load-file= and =bmkp-gt-load-index= removed from
+its property alist.  The in-memory =bookmark-alist= is untouched.
+
+This mirrors the pattern =bookmark-x= already uses to keep its
+transient "temp" flag off disk (see
+=bmkx--strip-temps-around-bookmark-write-file=).
+
+** Stack API
+
+Public commands (all under the =bmkp-gt-= prefix):
+
+- =bmkp-gt-loaded-files= — return the list of bk files currently on
+  the stack, top first (most recently loaded).  Derived from the
+  distinct =bmkp-gt-load-file= values in =bookmark-alist=, sorted by
+  the maximum =bmkp-gt-load-index= per file.
+- =bmkp-gt-unload-bookmark-file FILE= — remove every record whose
+  =bmkp-gt-load-file= equals FILE.  Signals =user-error= when FILE is
+  not on the stack.  Bumps =bookmark-alist-modification-count=.
+- =bmkp-gt-pop-bookmark-file= — interactive convenience: unload the
+  top of the stack.  Errors when the stack is empty.
+- =bmkp-gt-reload-bookmark-file FILE= — unload FILE, then
+  =bookmark-load= FILE with no OVERWRITE.  FILE ends up back on top
+  of the stack with a fresh load-index.
+
+Non-goals for this iteration:
+
+- Any change to =bookmark-save= or the "which file does saving write
+  to?" question.  =bmkp-current-bookmark-file= remains the single
+  sink, exactly as today.
+- Any UI for browsing the stack (a dedicated buffer, a header line
+  in =*Bookmark List*=, etc.).  Command-line access first; UI later.
+- A "bind this new bookmark to a specific file" =bookmark-set=
+  variant.  Explicitly listed as future work in the =Follow-ups=
+  section below.
+
+* Interaction with existing behavior
+
+- =C-u M-x bookmark-load FILE= (OVERWRITE) still resets
+  =bookmark-alist= to just FILE's records and reassigns
+  =bmkp-current-bookmark-file= to FILE.  Under our advice, every
+  fresh record is stamped with =FILE=.  The stack naturally reduces
+  to a single entry.
+- Plain =M-x bookmark-load FILE= pushes.  Same records that upstream
+  would append are now stamped with FILE.
+- =M-x bookmark-set NAME= creates a record stamped with
+  =bmkp-current-bookmark-file=.  =bookmark-save= writes it back to
+  that file, consistent with the stamp.
+- =bookmark-rename= does not touch =bmkp-gt-load-file=; the origin
+  stamp survives rename.
+- =bookmark-delete= removes the record entirely; nothing extra to do.
+
+** Silent-merge trap (unchanged, called out)
+
+If A is loaded, B is pushed, and the user runs =bookmark-save=,
+today's behavior is: A on disk is overwritten with A + B's contents,
+since save writes the full =bookmark-alist= to
+=bmkp-current-bookmark-file= (still A).  This design does NOT close
+that trap.  The remedies fall under the future "bind bookmark to
+specific file" work, or under an optional save-time guard that warns
+when records in =bookmark-alist= carry a stamp different from
+=bmkp-current-bookmark-file=.  Either can layer on top of this
+change; neither is in scope here.
+
+* Testing plan
+
+New file =test/bmkp-gt-test-stack.el= with ERT cases:
+
+Origin stamp
+- Loading a file stamps every record's =bmkp-gt-load-file= with the
+  absolute FILE path.
+- =bookmark-set= stamps the new record with
+  =bmkp-current-bookmark-file=.
+- The advice ordering means =bmkp-gt-load-index= and
+  =bmkp-gt-load-file= appear together on every loaded record.
+
+On-disk cleanliness
+- =bookmark-write-file= produces output containing no
+  =bmkp-gt-load-file= and no =bmkp-gt-load-index= symbols.
+- The in-memory records after the save still carry both properties.
+- A file loaded after being saved comes back with a fresh stamp
+  (i.e., the strip and re-stamp round-trip works).
+
+Stack API
+- =bmkp-gt-loaded-files= returns files in top-first order after a
+  sequence of pushes.
+- =bmkp-gt-unload-bookmark-file= removes exactly the records
+  belonging to that file; leaves records of other files untouched.
+- =bmkp-gt-pop-bookmark-file= unloads the top file; second call
+  unloads the next; empty-stack call errors.
+- =bmkp-gt-reload-bookmark-file= yields the same record set (by
+  name) and re-stamps origin.
+- Unload of the file currently equal to =bmkp-current-bookmark-file=
+  also removes any in-session records that were stamped with it.
+- =C-u M-x bookmark-load C= after A + B are stacked resets to a
+  single-entry stack containing only C.
+
+Regressions
+- Existing =bmkp-gt-test-load-order= cases still pass with the guard
+  removed and the advice type changed.
+
+* Migration
+
+None required.
+
+- Users whose current bk files have persisted =bmkp-gt-load-index=
+  values: on next load, the load advice overwrites them with fresh
+  indices (guard is gone); on next save, the strip advice removes
+  them from disk.  Two operations, both automatic, no user action.
+- Users on old =bookmark-plus-gt= who upgrade: same as above.  No
+  break in behavior.
+
+* Follow-ups (out of scope for this change)
+
+1. *Bind a new bookmark to a specific file.*  A =bmkp-gt-set-in-file
+   FILE NAME= command (or a =C-u= arg on =bookmark-set=) that stamps
+   the new record with FILE rather than =bmkp-current-bookmark-file=.
+   Needed for the multi-file workflow where the user wants to add
+   bookmarks to a file that isn't the current sink.
+2. *Save routing.*  Once (1) and (6) exist, decide whether
+   =bookmark-save= splits the alist by =bmkp-gt-load-file= and
+   writes each origin file separately, or continues to write only
+   =bmkp-current-bookmark-file= and asks the user about the rest.
+3. *Save-time warning.*  Cheap first step toward (2): before
+   =bookmark-save= runs, if =bookmark-alist= contains records whose
+   =bmkp-gt-load-file= differs from =bmkp-current-bookmark-file=,
+   display a warning listing counts per file.  Makes the silent-
+   merge trap visible without changing save behavior.
+4. *=*Bookmark List*= presentation.*  Group / colorize / narrow by
+   origin file.  With per-record origin available, this is a small
+   UI addition.
+5. *Persistence of the stack across sessions.*  Save the *set* of
+   files that were loaded (not the records — those live in the
+   files themselves) into =bookmark-plus-gt-state.el= so that a
+   restart can re-push them in the same order.  Optional; adds a
+   defcustom.
+6. *Move bookmarks between loaded files from =*Bookmark List*=.*
+   A command that, given one or more marked bookmarks and a target
+   file chosen from the current stack, rewrites their
+   =bmkp-gt-load-file= stamp to the target.  Likely bound in the
+   =*Bookmark List*= mode map (e.g. =M= for "move to file", to
+   pair naturally with =R= for relocate).  Prompting reads from
+   =bmkp-gt-loaded-files= so only currently-loaded files are
+   offered — moving to an unloaded file would create an orphaned
+   stamp with nowhere to save to.
+
+   Note on effect: until save routing (2) exists, this command
+   *only* changes the origin stamp — it does not itself save.
+   =bookmark-save= still writes the whole alist to
+   =bmkp-current-bookmark-file= as it does today.  The move
+   becomes fully meaningful when per-origin save lands; until
+   then it lets the user *prepare* correct stamps and reason
+   about origins in the list buffer.  Consider optionally
+   pairing the move with an immediate per-file save of the
+   target once (2) is available.
+
+* Open questions for the reviewer
+
+- =bmkp-gt-pop-bookmark-file= on a stack of one — should it pop
+  (leaving =bookmark-alist= empty) or error?  Bias: error.  Popping
+  the last loaded file leaves the system in a state upstream is not
+  prepared for.
+- =bmkp-gt-unload-bookmark-file= on the file currently equal to
+  =bmkp-current-bookmark-file= — allow, refuse, or prompt?  Bias:
+  allow; the sink pointer stays where it is, and any subsequent
+  =bookmark-set= restamps records with the same path (no-op change
+  to the alist, records reappear on save).
+- Naming: =bmkp-gt-loaded-files= vs. =bmkp-gt-file-stack= vs.
+  =bmkp-gt-bookmark-file-stack=.  Bias: =bmkp-gt-file-stack= for the
+  variable/accessor and keep verb-first =unload= /=pop= /=reload=
+  commands.
