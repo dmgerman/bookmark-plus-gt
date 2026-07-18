@@ -26,12 +26,17 @@ bookmark-plus-gt in order it to properly work.
   :load-path "~/.emacs.d/modules/bookmark-plus-gt"
   :after bookmark+
   :config
-  ;; Optional features — comment out any you do not want.
-  (require 'bookmark-plus-gt-jump)         ; consult jump reader + list preview
-  (require 'bookmark-plus-gt-tags)            ; tags and type columns in *Bookmark List*
-  (require 'bookmark-plus-gt-auto-update)     ; reading-position tracker
-  (require 'bookmark-plus-gt-browsel-tabs))   ; browser tabs as temporary URL bookmarks
+  ;; Every feature file is loaded automatically by requiring the
+  ;; package.  Enable the ones you want with the corresponding mode:
+  (bmkp-gt-bmenu-tags-mode 1)    ; tags and type columns in *Bookmark List*
+  (bmkp-gt-auto-update-mode 1)   ; reading-position tracker
+  (bmkp-gt-browsel-tabs-mode 1)) ; browser tabs as temporary URL bookmarks
 #+end_src
+
+Each optional feature is a global minor mode that is off by
+default and attaches no side effects until enabled.  Toggle any
+of them at any time; disabling removes the associated advice,
+hooks, and keybindings.
 
 Optional features:
 
@@ -45,22 +50,19 @@ Optional features:
     rewrites the type column in the annotation), =orderless= (needed
     for stacked =@Type ;tag= minibuffer filtering — see "Minibuffer
     filtering" below).
-- =bookmark-plus-gt-tags= — extra columns in =*Bookmark List*=
+- =bmkp-gt-bmenu-tags-mode= — extra columns in =*Bookmark List*=
   between the name and the filename: a tags column (=;=) and a type
   column (=@=).  See "*Bookmark List* columns" below.
-  - Requires =bookmark-plus-gt-jump= (for the type-label
-    helper).  Loading this file pulls in the jump module even if the
-    corresponding =require= above is commented out.
-- =bookmark-plus-gt-auto-update= — the reading-position tracker:
+- =bmkp-gt-auto-update-mode= — the reading-position tracker:
   bookmarks carrying the =auto-update= property have their location
   refreshed as the file is read.  See "Auto-update bookmarks" below.
-  - No extra requirements.
-- =bookmark-plus-gt-browsel-tabs= — every open browser tab exposed
-  as a temporary URL bookmark.  See "Browser tabs as temporary
-  bookmarks" below.
+- =bmkp-gt-browsel-tabs-mode= — every open browser tab exposed as a
+  temporary URL bookmark.  See "Browser tabs as temporary bookmarks"
+  below.
   - Requires [[https://github.com/dmgerman/browsel][browsel]] version =0.94= or later (loaded and connected to
-    at least one browser).  The module checks =browsel-version= at
-    load time and signals an error if it is older.
+    at least one browser).  The =bookmark-plus-gt-browsel-tabs= file
+    checks =browsel-version= at load time and signals an error if it
+    is older.
 
 Two things are always on when =bookmark-plus-gt= itself is loaded,
 because they are not features you can meaningfully opt out of:
@@ -107,9 +109,8 @@ because they are not features you can meaningfully opt out of:
 
 - =bmkp-gt-auto-update-mode= — global minor mode; when on, refreshes
   every auto-update bookmark's position from the buffer visiting its
-  file (idle timer + on kill-buffer + on window-state-change).
-  Auto-enables at load time unless
-  =bmkp-gt-auto-update-enable-flag= is nil.
+  file (idle timer + on kill-buffer + on window-state-change).  Off
+  by default; enable with =(bmkp-gt-auto-update-mode 1)=.
 
 - =bmkp-gt-auto-update-now= — force one refresh pass immediately.
 
@@ -606,7 +607,6 @@ bookmark name.
 | =bmkp-gt-bmenu-column-gap=               | Space between adjacent columns (default =2=). |
 | =bmkp-gt-bmenu-name-max-width=           | Cap on the name column width when computing tags/type start (default =50=; =nil= = no cap). |
 | =bmkp-gt-bmenu-name-tail-keep=           | Characters kept at the tail of a smart-truncated name (default =10=). |
-| =bmkp-gt-auto-update-enable-flag=        | Auto-enable the tracking mode at load (default =t=). |
 | =bmkp-gt-auto-update-interval=           | Idle seconds between refresh ticks (default =60=). |
 | =bmkp-gt-state-file=                     | Where the state-file intercept persists (default =~/.emacs.d/bookmark-plus-gt-state.el=). |
 | =bmkp-gt-browsel-tabs-browsers=          | Browsers polled for tabs — =nil= / name / list of names (default =nil=). |

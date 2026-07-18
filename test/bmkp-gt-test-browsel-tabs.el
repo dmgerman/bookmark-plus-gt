@@ -10,6 +10,11 @@
 (require 'bookmark-plus-gt-browsel-tabs)
 (require 'cl-lib)
 
+;; Tests below assume the feature is active — matches the pre-migration
+;; "installed at load" behavior.  Individual tests that need the mode
+;; off can toggle it themselves.
+(bmkp-gt-browsel-tabs-mode 1)
+
 
 ;;; Helpers ------------------------------------------------------------
 

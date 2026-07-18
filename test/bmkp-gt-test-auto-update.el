@@ -6,6 +6,11 @@
 (require 'bookmark-plus-gt-auto-update)
 (require 'cl-lib)
 
+;; Tests below assume the feature is active — matches the pre-migration
+;; "installed at load" behavior.  Individual tests that need the mode
+;; off can toggle it themselves.
+(bmkp-gt-auto-update-mode 1)
+
 
 ;;; Predicate + property ------------------------------------------------
 
@@ -210,24 +215,25 @@ tick's remove/set pair is guarded by the flag."
 
 ;;; Install / uninstall -------------------------------------------------
 
-(ert-deftest bmkp-gt-test-auto-update/install-registers-advice ()
-  "`install' registers the list-1 advice, `uninstall' removes it."
-  (unwind-protect
-      (progn
-        (bmkp-gt-auto-update-uninstall)
-        (should-not (advice-member-p 'bmkp-gt-auto-update--list-1-advice
-                                     'bmkp-bmenu-list-1))
-        (bmkp-gt-auto-update-install)
-        (should (advice-member-p 'bmkp-gt-auto-update--list-1-advice
-                                 'bmkp-bmenu-list-1)))
-    (bmkp-gt-auto-update-install)))
+(ert-deftest bmkp-gt-test-auto-update/mode-toggles-advice ()
+  "Enabling the mode registers the list-1 advice; disabling removes it."
+  (let ((was-on bmkp-gt-auto-update-mode))
+    (unwind-protect
+        (progn
+          (bmkp-gt-auto-update-mode -1)
+          (should-not (advice-member-p 'bmkp-gt-auto-update--list-1-advice
+                                       'bmkp-bmenu-list-1))
+          (bmkp-gt-auto-update-mode 1)
+          (should (advice-member-p 'bmkp-gt-auto-update--list-1-advice
+                                   'bmkp-bmenu-list-1)))
+      (bmkp-gt-auto-update-mode (if was-on 1 -1)))))
 
 (ert-deftest bmkp-gt-test-auto-update/marks-width-unchanged ()
-  "`install' does not modify `bmkp-bmenu-marks-width' (upstream bakes 4 in)."
+  "The mode does not modify `bmkp-bmenu-marks-width' (upstream bakes 4 in)."
   (should (= 4 bmkp-bmenu-marks-width)))
 
-(ert-deftest bmkp-gt-test-auto-update/install-binds-caret-key ()
-  "`install' binds `^' in `bookmark-bmenu-mode-map' to the bmenu toggle."
+(ert-deftest bmkp-gt-test-auto-update/mode-binds-caret-key ()
+  "Enabling the mode binds `^' in `bookmark-bmenu-mode-map' to the bmenu toggle."
   (should (eq (lookup-key bookmark-bmenu-mode-map (kbd "^"))
               #'bmkp-gt-auto-update-bmenu-toggle)))
 
@@ -260,8 +266,11 @@ tick's remove/set pair is guarded by the flag."
         (when (get-buffer "*Help*") (kill-buffer "*Help*"))
         (bmkp-gt-auto-update-mode (if was-on 1 -1))))))
 
-(ert-deftest bmkp-gt-test-auto-update/help-legend-when-mode-off ()
-  "When mode is off, legend line reads `tracking mode disabled'."
+(ert-deftest bmkp-gt-test-auto-update/help-legend-absent-when-mode-off ()
+  "When mode is off, the auto-update legend line is absent entirely.
+The legend is inserted by an advice attached only while the mode is
+on, so disabling the mode leaves the vanilla Bookmark+ marks legend
+in place with no `^' entry appended."
   (bmkp-gt-test-with-clean-bookmarks
     (bmkp-gt-test-with-fixture-buffer buf "x"
       (bmkp-gt-test--make-bookmark "help-fixture" buf))
@@ -270,8 +279,9 @@ tick's remove/set pair is guarded by the flag."
           (progn
             (bmkp-gt-auto-update-mode -1)
             (let ((text (bmkp-gt-test-auto-update--help-text)))
-              (should (string-match-p "auto-update  (`\\^' to toggle)  (tracking mode disabled)" text))
-              (should-not (string-match-p "position tracked as you read" text))))
+              (should-not (string-match-p "auto-update" text))
+              (should-not (string-match-p "position tracked as you read" text))
+              (should-not (string-match-p "tracking mode disabled" text))))
         (when (get-buffer bmkp-bmenu-buffer) (kill-buffer bmkp-bmenu-buffer))
         (when (get-buffer "*Help*") (kill-buffer "*Help*"))
         (bmkp-gt-auto-update-mode (if was-on 1 -1))))))

@@ -6,6 +6,11 @@
 (require 'bookmark-plus-gt-tags)
 (require 'cl-lib)
 
+;; Tests below assume the feature is active — matches the pre-migration
+;; "installed at load" behavior.  Individual tests that need the mode
+;; off can toggle it themselves.
+(bmkp-gt-bmenu-tags-mode 1)
+
 
 ;;; Formatter -----------------------------------------------------------
 

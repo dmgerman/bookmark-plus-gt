@@ -29,20 +29,16 @@
 ;;     :straight nil
 ;;     :after bookmark+
 ;;     :config
-;;     (require 'bookmark-plus-gt-jump)
-;;     (require 'bookmark-plus-gt-tags)
-;;     (require 'bookmark-plus-gt-auto-update))
+;;     (bmkp-gt-bmenu-tags-mode 1)
+;;     (bmkp-gt-auto-update-mode 1)
+;;     (bmkp-gt-browsel-tabs-mode 1))
 ;;
-;; This file itself only sets up the always-on pieces (the
-;; `bookmark--jump-via' display fix, the state-file persistence
-;; intercept, and the `bmkp-gt-relocate-here' commands).  The three
-;; optional feature files above are loaded by the user with
-;; `require'; comment any out to skip it.
-;;
-;; The auto-update feature has a per-file toggle
-;; (`bmkp-gt-auto-update-enable-flag') controlling whether the mode
-;; auto-enables at load; that is independent of whether the file is
-;; loaded at all.
+;; Loading this file requires every feature file (jump, tags,
+;; auto-update, browsel-tabs); enable the ones you want by turning on
+;; the corresponding global minor mode.  The always-on pieces set up
+;; here — the `bookmark--jump-via' display fix, the state-file
+;; persistence intercept, and the `bmkp-gt-relocate-here' commands —
+;; run unconditionally.
 
 ;;; Code:
 
@@ -656,6 +652,28 @@ To make this the default sort in `*Bookmark List*':
     (cond ((> i1 i2)  '(t))
           ((< i1 i2)  '(nil))
           (t          nil))))
+
+
+
+;;; Feature files ------------------------------------------------------
+;;
+;; All optional feature files are loaded here so users need only
+;; `(require 'bookmark-plus-gt)' (or `use-package bookmark-plus-gt') to
+;; make every mode available.  Each file defines a global minor mode
+;; but attaches no side effects at load; enable a feature with:
+;;
+;;     (bmkp-gt-bmenu-tags-mode 1)
+;;     (bmkp-gt-auto-update-mode 1)
+;;     (bmkp-gt-browsel-tabs-mode 1)
+
+(require 'bookmark-plus-gt-jump)
+(require 'bookmark-plus-gt-tags)
+(require 'bookmark-plus-gt-auto-update)
+
+;; The browsel-tabs module hard-requires `browsel'.  When browsel is
+;; not installed, skip the load — the mode simply is not available.
+(when (locate-library "browsel")
+  (require 'bookmark-plus-gt-browsel-tabs))
 
 
 (provide 'bookmark-plus-gt)

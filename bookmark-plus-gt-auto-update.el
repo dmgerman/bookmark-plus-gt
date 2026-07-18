@@ -28,18 +28,13 @@
 ;;   - `window-state-change-hook' (catches "switching away").
 ;;
 ;; The refresh only runs while `bmkp-gt-auto-update-mode' is on.  The
-;; mode auto-enables at load time when
-;; `bmkp-gt-auto-update-enable-flag' is non-nil (the default).
+;; mode is off by default; enable it with `(bmkp-gt-auto-update-mode 1)'.
 ;;
-;; Display: `*Bookmark List*' shows a `^' in a fifth marks column for
-;; each bookmark carrying the property.  The mark uses face
-;; `bmkp-gt-caret-mark' when the mode is on, and
-;; `bmkp-gt-caret-mark-inactive' (dim) when the mode is off — so the
-;; user can see at a glance whether tracking is active.
-;;
-;; Key `^' in `bookmark-bmenu-mode-map' toggles the property on the
-;; bookmark at point.  From outside the list, use
-;; `bmkp-gt-auto-update-toggle'.
+;; Display: while the mode is on, `*Bookmark List*' shows a `^' in a
+;; fifth marks column for each bookmark carrying the property, and `^'
+;; in `bookmark-bmenu-mode-map' toggles the property on the row at
+;; point.  Turning the mode off removes the timer, hooks, advice, and
+;; keybinding.  From outside the list, use `bmkp-gt-auto-update-toggle'.
 ;;
 ;; No Bookmark+ source is modified.  `bmkp-bmenu-marks-width' is left
 ;; at 4 because upstream's render bakes in that value: it computes
@@ -77,15 +72,6 @@
 (defgroup bookmark-plus-gt-auto-update nil
   "Reading-position tracking for bookmarks."
   :group 'bookmark-plus-gt)
-
-(defcustom bmkp-gt-auto-update-enable-flag t
-  "Non-nil means auto-enable `bmkp-gt-auto-update-mode' at load time.
-When nil, the file is loaded and the advice + marks-column widening
-still install, but the mode itself stays off until the user calls
-`bmkp-gt-auto-update-mode' explicitly.  Existing auto-update
-bookmarks then render with the inactive face."
-  :type 'boolean
-  :group 'bookmark-plus-gt-auto-update)
 
 (defcustom bmkp-gt-auto-update-interval 60
   "Seconds of idle time between ticks of `bmkp-gt-auto-update-mode'."
@@ -200,23 +186,24 @@ file is currently visited by a live buffer."
 (define-minor-mode bmkp-gt-auto-update-mode
   "Toggle global auto-tracking of bookmarks with the `auto-update' property.
 
-When on, three triggers refresh such a bookmark's position and
-context strings to the current point of the buffer visiting its
-file:
+When on:
 
-  - An idle timer firing every `bmkp-gt-auto-update-interval' seconds.
-  - `kill-buffer-hook'         (catches \"closing the file\").
-  - `window-state-change-hook' (catches \"switching away\").
+  - Three triggers refresh such a bookmark's position and context
+    strings to the current point of the buffer visiting its file:
+    an idle timer firing every `bmkp-gt-auto-update-interval'
+    seconds, `kill-buffer-hook' (catches \"closing the file\"), and
+    `window-state-change-hook' (catches \"switching away\").
+  - `*Bookmark List*' gains a `^' column marking bookmarks that
+    carry the property, and a `^' entry in the help buffer's marks
+    legend.
+  - The bookmark description buffer (`bmkp-describe-bookmark') shows
+    an `Auto-update:' line for such bookmarks.
+  - `^' in `bookmark-bmenu-mode-map' toggles the property on the
+    row at point.
 
 Bookmarks without the property are not touched.  Files whose
-buffer is not currently visited are not touched either.
-
-The auto-update mark in `*Bookmark List*' uses face
-`bmkp-gt-caret-mark' while this mode is on, and
-`bmkp-gt-caret-mark-inactive' while it is off.
-
-Set the property on a bookmark with `bmkp-gt-auto-update-toggle'
-or by pressing `^' in `*Bookmark List*'."
+buffer is not currently visited are not touched either.  Turning
+the mode off removes the timer, hooks, advice, and keybinding."
   :init-value nil :global t :group 'bookmark-plus-gt-auto-update
   (when bmkp-gt-auto-update--timer
     (cancel-timer bmkp-gt-auto-update--timer)
@@ -227,10 +214,26 @@ or by pressing `^' in `*Bookmark List*'."
           (run-with-idle-timer bmkp-gt-auto-update-interval 'REPEAT
                                #'bmkp-gt-auto-update--tick))
     (add-hook 'kill-buffer-hook         #'bmkp-gt-auto-update--on-kill-buffer)
-    (add-hook 'window-state-change-hook #'bmkp-gt-auto-update--on-window-state-change))
+    (add-hook 'window-state-change-hook #'bmkp-gt-auto-update--on-window-state-change)
+    (advice-add 'bmkp-bmenu-list-1 :around
+                #'bmkp-gt-auto-update--list-1-advice
+                '((depth . -100)))
+    (advice-add 'bmkp-bmenu-mode-status-help :after
+                #'bmkp-gt-auto-update--legend-advice)
+    (advice-add 'bmkp-bookmark-description :around
+                #'bmkp-gt-auto-update--describe-advice)
+    (when (boundp 'bookmark-bmenu-mode-map)
+      (define-key bookmark-bmenu-mode-map (kbd "^") #'bmkp-gt-auto-update-bmenu-toggle)))
    (t
     (remove-hook 'kill-buffer-hook         #'bmkp-gt-auto-update--on-kill-buffer)
-    (remove-hook 'window-state-change-hook #'bmkp-gt-auto-update--on-window-state-change)))
+    (remove-hook 'window-state-change-hook #'bmkp-gt-auto-update--on-window-state-change)
+    (advice-remove 'bmkp-bmenu-list-1        #'bmkp-gt-auto-update--list-1-advice)
+    (advice-remove 'bmkp-bmenu-mode-status-help #'bmkp-gt-auto-update--legend-advice)
+    (advice-remove 'bmkp-bookmark-description #'bmkp-gt-auto-update--describe-advice)
+    (when (and (boundp 'bookmark-bmenu-mode-map)
+               (eq (lookup-key bookmark-bmenu-mode-map (kbd "^"))
+                   #'bmkp-gt-auto-update-bmenu-toggle))
+      (define-key bookmark-bmenu-mode-map (kbd "^") nil))))
   ;; The mark's face depends on the mode; redisplay the list if it exists.
   (when (get-buffer "*Bookmark List*")
     (bmkp-refresh/rebuild-menu-list nil 'no-msg)))
@@ -354,38 +357,6 @@ Only when BOOKMARK carries the `auto-update' property (non-nil)."
     (if (bookmark-prop-get bookmark 'auto-update)
         (bmkp-gt-auto-update--inject-line desc "Auto-update:\t\tyes\n")
       desc)))
-
-
-;;; Install / uninstall -------------------------------------------------
-
-(defun bmkp-gt-auto-update-install ()
-  "Register advices and install the `^' keybinding.
-Idempotent.  Called at load time when
-`bmkp-gt-auto-update-enable-flag' is non-nil."
-  (advice-add 'bmkp-bmenu-list-1 :around
-              #'bmkp-gt-auto-update--list-1-advice
-              '((depth . -100)))
-  (advice-add 'bmkp-bmenu-mode-status-help :after
-              #'bmkp-gt-auto-update--legend-advice)
-  (advice-add 'bmkp-bookmark-description :around
-              #'bmkp-gt-auto-update--describe-advice)
-  (define-key bookmark-bmenu-mode-map (kbd "^") #'bmkp-gt-auto-update-bmenu-toggle))
-
-(defun bmkp-gt-auto-update-uninstall ()
-  "Reverse `bmkp-gt-auto-update-install'."
-  (advice-remove 'bmkp-bmenu-list-1 #'bmkp-gt-auto-update--list-1-advice)
-  (advice-remove 'bmkp-bmenu-mode-status-help #'bmkp-gt-auto-update--legend-advice)
-  (advice-remove 'bmkp-bookmark-description #'bmkp-gt-auto-update--describe-advice)
-  (when (eq (lookup-key bookmark-bmenu-mode-map (kbd "^"))
-            #'bmkp-gt-auto-update-bmenu-toggle)
-    (define-key bookmark-bmenu-mode-map (kbd "^") nil)))
-
-
-;;; Auto-install --------------------------------------------------------
-
-(when bmkp-gt-auto-update-enable-flag
-  (bmkp-gt-auto-update-install)
-  (bmkp-gt-auto-update-mode 1))
 
 
 (provide 'bookmark-plus-gt-auto-update)

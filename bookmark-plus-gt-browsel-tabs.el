@@ -58,6 +58,13 @@
 ;; issues a warning and continues — existing bookmarks (of any type)
 ;; keep working; the browsel-tab set is simply empty until the browser
 ;; reconnects.
+;;
+;; Activation: this file defines everything but attaches no side
+;; effects at load time.  Enable the integration with:
+;;
+;;     (bmkp-gt-browsel-tabs-mode 1)
+;;
+;; Turning the mode off removes all advice and the jump-narrow entry.
 
 ;;; Code:
 
@@ -84,10 +91,12 @@ Earlier browsel builds lack `browsel-focus-tab' /
 (declare-function browsel-focus-tab    "browsel")
 (declare-function browsel-close-tab    "browsel")
 (declare-function browsel-browse-url   "browsel-url-handler")
-(declare-function bmkp-make-bookmark-temporary "bookmark+-1")
-(declare-function bmkp-url-bookmark-p          "bookmark+-1")
+(declare-function bmkp-make-bookmark-temporary   "bookmark+-1")
+(declare-function bmkp-url-bookmark-p            "bookmark+-1")
+(declare-function bmkp-refresh/rebuild-menu-list "bookmark+-1")
 
 (defvar bmkp-non-file-filename)         ; In `bookmark+-1'.
+(defvar bmkp-gt-browsel-tabs-mode)      ; Defined below by `define-minor-mode'.
 
 
 ;;; Customization -------------------------------------------------------
@@ -165,15 +174,21 @@ post-handler chain — annotation display, auto-light, fringe mark
 
 (defun bmkp-gt-browsel-tabs--register-jump-narrow ()
   "Register the browsel-tab handler as `Browser tab' in `bmkp-gt-jump-narrow'.
-Idempotent; safe to call repeatedly."
-  (when (boundp 'bmkp-gt-jump-narrow)
+Idempotent; safe to call repeatedly.  No-op unless
+`bmkp-gt-browsel-tabs-mode' is on and `bmkp-gt-jump-narrow' is bound
+(i.e. `bookmark-plus-gt-jump' has been loaded)."
+  (when (and bmkp-gt-browsel-tabs-mode
+             (boundp 'bmkp-gt-jump-narrow))
     (unless (assoc ?b bmkp-gt-jump-narrow)
       (add-to-list 'bmkp-gt-jump-narrow
                    '(?b "Browser tab" bmkp-gt-browsel-tabs-jump)))))
 
-(bmkp-gt-browsel-tabs--register-jump-narrow)
-(with-eval-after-load 'bookmark-plus-gt-jump
-  (bmkp-gt-browsel-tabs--register-jump-narrow))
+(defun bmkp-gt-browsel-tabs--unregister-jump-narrow ()
+  "Remove the browsel-tab entry from `bmkp-gt-jump-narrow'.
+No-op when the entry is absent or the jump module is not loaded."
+  (when (boundp 'bmkp-gt-jump-narrow)
+    (setq bmkp-gt-jump-narrow
+          (assq-delete-all ?b bmkp-gt-jump-narrow))))
 
 
 ;;; URL/Web subtype: teach `bmkp-url-bookmark-p' about us --------------
@@ -184,9 +199,6 @@ Return non-nil for the upstream URL types and for browsel-tab
 bookmarks.  ORIG is the advised function; BOOKMARK is its arg."
   (or (funcall orig bookmark)
       (bmkp-gt-browsel-tabs-p bookmark)))
-
-(advice-add 'bmkp-url-bookmark-p :around
-            #'bmkp-gt-browsel-tabs--url-p-advice)
 
 
 ;;; Refresh -------------------------------------------------------------
@@ -309,9 +321,6 @@ or `bmkp-url-jump' call."
     bmkp-url-jump-other-window)
   "Functions advised to refresh browsel-tab bookmarks before running.")
 
-(dolist (fn bmkp-gt-browsel-tabs--auto-refresh-triggers)
-  (advice-add fn :before #'bmkp-gt-browsel-tabs--auto-refresh))
-
 
 ;;; Delete-closes-tab -------------------------------------------------
 
@@ -341,7 +350,58 @@ which calls `bookmark-delete' once per marked record) and
                     bookmark-name (error-message-string err))
             :warning)))))))
 
-(advice-add 'bookmark-delete :before #'bmkp-gt-browsel-tabs--delete-advice)
+
+;;; Mode ---------------------------------------------------------------
+
+;;;###autoload
+(define-minor-mode bmkp-gt-browsel-tabs-mode
+  "Toggle browser-tab integration for Bookmark+.
+
+When on:
+
+  - `bmkp-gt-jump-narrow' gains a `Browser tab' entry (or gains it
+    when `bookmark-plus-gt-jump' loads).
+  - `bmkp-url-bookmark-p' is advised so URL-only commands and filters
+    also match browsel-tab bookmarks.
+  - Four functions that read `bookmark-alist' — `bookmark-bmenu-list',
+    `bookmark-completing-read', `bmkp-url-jump',
+    `bmkp-url-jump-other-window' — are advised to refresh the
+    browsel-tab set before running.
+  - `bookmark-delete' is advised so deleting a browsel-tab bookmark
+    also closes the underlying browser tab.
+
+Enabling the mode also runs one immediate refresh so the tabs
+appear in `bookmark-alist' right away; turning it off removes all
+advice and the jump-narrow entry AND clears every browsel-tab
+bookmark from `bookmark-alist' — otherwise stale records would
+linger with no refresh to keep them current."
+  :init-value nil :global t :group 'bookmark-plus-gt-browsel-tabs
+  (cond
+   (bmkp-gt-browsel-tabs-mode
+    (bmkp-gt-browsel-tabs--register-jump-narrow)
+    (advice-add 'bmkp-url-bookmark-p :around
+                #'bmkp-gt-browsel-tabs--url-p-advice)
+    (dolist (fn bmkp-gt-browsel-tabs--auto-refresh-triggers)
+      (advice-add fn :before #'bmkp-gt-browsel-tabs--auto-refresh))
+    (advice-add 'bookmark-delete :before #'bmkp-gt-browsel-tabs--delete-advice)
+    (bmkp-gt-browsel-tabs-refresh))
+   (t
+    (bmkp-gt-browsel-tabs--unregister-jump-narrow)
+    (advice-remove 'bmkp-url-bookmark-p #'bmkp-gt-browsel-tabs--url-p-advice)
+    (dolist (fn bmkp-gt-browsel-tabs--auto-refresh-triggers)
+      (advice-remove fn #'bmkp-gt-browsel-tabs--auto-refresh))
+    (advice-remove 'bookmark-delete #'bmkp-gt-browsel-tabs--delete-advice)
+    (bmkp-gt-browsel-tabs--clear)))
+  (when (and (fboundp 'bmkp-refresh/rebuild-menu-list)
+             (get-buffer "*Bookmark List*"))
+    (bmkp-refresh/rebuild-menu-list nil 'no-msg)))
+
+;; Deferred registration: if `bookmark-plus-gt-jump' loads after this
+;; module (which is the expected order), re-run the register once it
+;; is loaded.  The register itself checks the mode state, so this is
+;; a no-op when the mode is off.
+(with-eval-after-load 'bookmark-plus-gt-jump
+  (bmkp-gt-browsel-tabs--register-jump-narrow))
 
 
 (provide 'bookmark-plus-gt-browsel-tabs)

@@ -71,6 +71,7 @@
 (declare-function bmkp-get-tags                   "bookmark+-1")
 (declare-function bmkp-get-bookmark               "bookmark+-1")
 (declare-function bmkp-bookmark-name-from-record  "bookmark+-1")
+(declare-function bmkp-refresh/rebuild-menu-list  "bookmark+-1")
 
 (defvar bmkp-bmenu-header-lines)   ; In `bookmark+-bmu'.
 (defvar bmkp-bmenu-marks-width)    ; In `bookmark+-bmu'.
@@ -446,27 +447,51 @@ after it."
                "   @  Type column\n"))))))))
 
 
-;;; Install / uninstall -------------------------------------------------
+;;; Mode -----------------------------------------------------------------
 
-(defun bmkp-gt-bmenu-tags-install ()
-  "Install advice and key bindings for bookmark-plus-gt-tags."
-  (advice-add 'bmkp-bmenu-list-1               :around #'bmkp-gt-bmenu-list-1-advice)
-  (advice-add 'bookmark-bmenu-toggle-filenames :around #'bmkp-gt-bmenu-toggle-filenames-advice)
-  (advice-add 'bmkp-bmenu-mode-status-help     :after  #'bmkp-gt-bmenu-help-advice)
-  (when (boundp 'bookmark-bmenu-mode-map)
-    (define-key bookmark-bmenu-mode-map (kbd ";") #'bmkp-gt-bmenu-toggle-tags)
-    (define-key bookmark-bmenu-mode-map (kbd "@") #'bmkp-gt-bmenu-toggle-type)))
+;;;###autoload
+(define-minor-mode bmkp-gt-bmenu-tags-mode
+  "Toggle the tags and type columns in `*Bookmark List*'.
 
-(defun bmkp-gt-bmenu-tags-uninstall ()
-  "Remove advice and key bindings installed by bookmark-plus-gt-tags."
-  (advice-remove 'bmkp-bmenu-list-1               #'bmkp-gt-bmenu-list-1-advice)
-  (advice-remove 'bookmark-bmenu-toggle-filenames #'bmkp-gt-bmenu-toggle-filenames-advice)
-  (advice-remove 'bmkp-bmenu-mode-status-help     #'bmkp-gt-bmenu-help-advice)
-  (when (boundp 'bookmark-bmenu-mode-map)
-    (define-key bookmark-bmenu-mode-map (kbd ";") nil)
-    (define-key bookmark-bmenu-mode-map (kbd "@") nil)))
+When on, three advices decorate the Bookmark+ list buffer with
+tags and type columns between the name and filename columns, and
+two keys are bound in `bookmark-bmenu-mode-map':
 
-(bmkp-gt-bmenu-tags-install)
+  `;'  `bmkp-gt-bmenu-toggle-tags'
+  `@'  `bmkp-gt-bmenu-toggle-type'
+
+The columns themselves can be shown or hidden independently via
+`bmkp-gt-bmenu-show-tags-flag' and `bmkp-gt-bmenu-show-type-flag';
+turning the mode off removes the machinery entirely and restores
+the vanilla Bookmark+ layout."
+  :init-value nil :global t :group 'bookmark-plus-gt
+  (cond
+   (bmkp-gt-bmenu-tags-mode
+    ;; Force both columns visible on enable — the visible columns are
+    ;; the user's confirmation that the mode is on.  They can hide
+    ;; either afterward with `;' / `@'.
+    (setq bmkp-gt-bmenu-show-tags-flag t
+          bmkp-gt-bmenu-show-type-flag t)
+    (advice-add 'bmkp-bmenu-list-1               :around #'bmkp-gt-bmenu-list-1-advice)
+    (advice-add 'bookmark-bmenu-toggle-filenames :around #'bmkp-gt-bmenu-toggle-filenames-advice)
+    (advice-add 'bmkp-bmenu-mode-status-help     :after  #'bmkp-gt-bmenu-help-advice)
+    (when (boundp 'bookmark-bmenu-mode-map)
+      (define-key bookmark-bmenu-mode-map (kbd ";") #'bmkp-gt-bmenu-toggle-tags)
+      (define-key bookmark-bmenu-mode-map (kbd "@") #'bmkp-gt-bmenu-toggle-type)))
+   (t
+    (advice-remove 'bmkp-bmenu-list-1               #'bmkp-gt-bmenu-list-1-advice)
+    (advice-remove 'bookmark-bmenu-toggle-filenames #'bmkp-gt-bmenu-toggle-filenames-advice)
+    (advice-remove 'bmkp-bmenu-mode-status-help     #'bmkp-gt-bmenu-help-advice)
+    (when (boundp 'bookmark-bmenu-mode-map)
+      (when (eq (lookup-key bookmark-bmenu-mode-map (kbd ";")) #'bmkp-gt-bmenu-toggle-tags)
+        (define-key bookmark-bmenu-mode-map (kbd ";") nil))
+      (when (eq (lookup-key bookmark-bmenu-mode-map (kbd "@")) #'bmkp-gt-bmenu-toggle-type)
+        (define-key bookmark-bmenu-mode-map (kbd "@") nil)))))
+  ;; Rerender `*Bookmark List*' if visible so the column toggle is reflected
+  ;; immediately (adding/removing the tags/type columns).
+  (when (and (fboundp 'bmkp-refresh/rebuild-menu-list)
+             (get-buffer "*Bookmark List*"))
+    (bmkp-refresh/rebuild-menu-list nil 'no-msg)))
 
 
 (provide 'bookmark-plus-gt-tags)
