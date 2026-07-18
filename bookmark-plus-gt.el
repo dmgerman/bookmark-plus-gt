@@ -11,6 +11,8 @@
 ;;
 ;; URL: https://github.com/dmgerman/bookmark-plus-gt
 ;;
+;; Version: 0.2.1
+;;
 ;; Keywords:      bookmarks, convenience
 ;; Compatibility: GNU Emacs 30+
 ;;
@@ -72,6 +74,19 @@ tick.")
 (defgroup bookmark-plus-gt nil
   "Non-invasive extensions to Bookmark+."
   :group 'bookmark-plus)
+
+(defconst bmkp-gt-version "0.2.1"
+  "Version of the bookmark-plus-gt package.
+Three-part MAJOR.MINOR.PATCH string.  Kept in sync with the
+`;; Version:' header at the top of this file, which
+`package.el' reads.")
+
+;;;###autoload
+(defun bmkp-gt-version ()
+  "Display the bookmark-plus-gt version and return it as a string."
+  (interactive)
+  (message "bookmark-plus-gt %s" bmkp-gt-version)
+  bmkp-gt-version)
 
 ;;; Bug 1 — Custom-handler jumps do not display (always-on) -------------
 ;;
