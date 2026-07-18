@@ -439,21 +439,20 @@ control the tag(s) applied automatically:
 
 - =bmkp-gt-default-tags-on-create= — tag(s) appended to every new
   bookmark you set with =C-x r m= or any other interactive frontend.
-  Anything you also type at the tags prompt is kept; duplicates are
-  removed.
+  Other tags can be added at creation time.
 
 - =bmkp-gt-default-tags-on-jump= — tag(s) pre-selected as the filter
   when you open =bmkp-gt-jump=.  Multiple tags in the list are OR'd
   together: the session opens showing bookmarks that carry ANY of
-  them.  The seeded filter is visible in the prompt as
+  them.  The filter is visible in the prompt as
   =;(tag1|tag2|...)= and can be removed with =M-D=, cleared with
   =M-T= (one-keystroke escape hatch to see every bookmark), or added
   to (as narrowing AND filters) with =M-t=.
 
 ** =bmkp-gt-default-tags-on-create= — simple, no DSL
 
-The create side takes a single flat shape.  A tag is either given
-directly, or as a list of tags:
+A tag is either a single tag (a string), or as a list of tags. All tags are
+added to the new bookmarks.
 
 | Value              | Effect                                                                     |
 |--------------------+----------------------------------------------------------------------------|
@@ -466,6 +465,33 @@ Nil elements inside a list are silently dropped.  The alist form
 accepted by the jump side has no meaning here (there is no filter
 engine at set time); setting one triggers a warning and no tag is
 applied.
+
+*** Tags prompt
+
+When =bmkp-prompt-for-tags-flag= is on (Bookmark+'s "prompt for tags
+during =bookmark-set=" setting), the tags prompt fires with the
+defaults pre-populated.  The prompt shape is:
+
+: Tags [work, urgent] (RET commit, TAB complete, M-t add, M-D pop, M-T clear):
+
+Bindings inside this prompt — same as the jump-side filter
+minibuffer, so the mental model is consistent:
+
+- =TAB= — complete against every tag currently in use.
+- =M-t= — pop up a dedicated completing-read for one tag, append.
+- =M-D= — pop the last tag from the set.
+- =M-T= — clear the whole set.
+- =RET= on empty input — commit the current set as the final tag list.
+- =RET= on typed input (or a completed selection) — append it as a
+  tag and continue reading.
+
+The main prompt itself completes against existing tags, so
+selecting an in-use tag is a couple of keystrokes; =M-t= is the
+route for typing a brand-new tag with the standard =completing-read=
+UI (still lax — you can enter anything).
+
+When =bmkp-prompt-for-tags-flag= is off, the defaults are applied
+silently after the bookmark is set (no prompt).
 
 ** =bmkp-gt-default-tags-on-jump= — a small DSL
 

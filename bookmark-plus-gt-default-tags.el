@@ -271,41 +271,201 @@ via `bmkp-gt-default-tags--kind' and interpret it per policy."
 
 ;;; Create side ---------------------------------------------------------
 
+(defun bmkp-gt-default-tags--current-create-tags ()
+  "Return the create-side defaults as a normalized list of tag strings.
+Accepts the `empty', `bare', or `flat' shape (nils in a flat list are
+dropped).  The `alist' shape is not valid on the create side; on
+encountering it, returns nil and issues a warning."
+  (let* ((raw  (bmkp-gt-default-tags--resolve
+                'bmkp-gt-default-tags-on-create))
+         (kind (bmkp-gt-default-tags--kind raw)))
+    (pcase kind
+      ('empty nil)
+      ('bare  (list raw))
+      ('flat  (delq nil raw))
+      ('alist (display-warning
+               'bookmark-plus-gt-default-tags
+               "`bmkp-gt-default-tags-on-create' resolved to an alist form; the alist form is meaningful only on the jump side.  No tags applied."
+               :warning)
+              nil))))
+
+(defvar bmkp-gt-default-tags--in-bookmark-set nil
+  "Dynamic marker: non-nil while a `bookmark-set' call is on the stack.
+Set by our `:around' advice on `bookmark-set'.  Consulted by the
+advice on `bmkp-read-tags-completing' to decide whether to substitute
+the tags-with-defaults reader.")
+
+(defvar bmkp-gt-default-tags--custom-reader-ran nil
+  "Dynamic flag: non-nil once the tags-with-defaults reader has fired
+within the current `bookmark-set' call.  Consulted by
+`bmkp-gt-default-tags--apply-on-create' — when set, the after-set
+hook skips the auto-append (the tags were already applied inside
+`bookmark-set' via bookmark-plus's own `bmkp-add-tags' call).")
+
 (defun bmkp-gt-default-tags--apply-on-create ()
   "Apply `bmkp-gt-default-tags-on-create' to the just-set bookmark.
 Attached to `bmkp-after-set-hook' while `bmkp-gt-default-tags-mode'
-is on.  The just-set bookmark name lives in
-`bookmark-current-bookmark' at this point (bound inside
-`bookmark-store', which `bookmark-set' calls just before running
-this hook).  No-op if the variable is unbound or no default tags
-resolve."
-  (let* ((raw   (bmkp-gt-default-tags--resolve
-                 'bmkp-gt-default-tags-on-create))
-         (kind  (bmkp-gt-default-tags--kind raw))
-         ;; Normalize the accepted shapes to a plain list of tag strings.
-         ;; The alist form is meaningless here (there is no filter engine
-         ;; on the create side); warn and skip.  A nil element in the
-         ;; flat form is the `untagged' sentinel — dropped here since a
-         ;; bookmark cannot be tagged with "no tag".
-         (tags  (pcase kind
-                  ('empty nil)
-                  ('bare  (list raw))
-                  ('flat  (delq nil raw))
-                  ('alist (display-warning
-                           'bookmark-plus-gt-default-tags
-                           "`bmkp-gt-default-tags-on-create' resolved to an alist form; the alist form is meaningful only on the jump side.  No tags applied."
-                           :warning)
-                          nil)))
-         (name  (and (boundp 'bookmark-current-bookmark)
+is on.  When the tags-with-defaults reader already ran in this
+`bookmark-set' (i.e. `bmkp-prompt-for-tags-flag' was on and the user
+was shown the pre-populated tags), this hook does nothing — the tags
+were already applied by bookmark-plus's own `bmkp-add-tags' call.
+Otherwise, appends the resolved defaults."
+  (unless bmkp-gt-default-tags--custom-reader-ran
+    (let ((tags (bmkp-gt-default-tags--current-create-tags))
+          (name (and (boundp 'bookmark-current-bookmark)
                      bookmark-current-bookmark)))
-    (when (and tags name)
-      (bmkp-add-tags name tags 'NO-UPDATE-P)
-      ;; Refresh the tag-completion cache so tags we just applied are
-      ;; offered at future tag prompts (Bookmark+'s own tag commands and
-      ;; our `bmkp-gt-default-tags-set-on-jump' reader both consult
-      ;; `bmkp-tags-alist').  `bmkp-add-tags' skips this update under
-      ;; NO-UPDATE-P, so do it explicitly here.
-      (bmkp-tags-list))))
+      (when (and tags name)
+        (bmkp-add-tags name tags 'NO-UPDATE-P)
+        ;; Refresh the tag-completion cache so tags we just applied are
+        ;; offered at future tag prompts (Bookmark+'s own tag commands and
+        ;; our `bmkp-gt-default-tags-set-on-jump' reader both consult
+        ;; `bmkp-tags-alist').  `bmkp-add-tags' skips this update under
+        ;; NO-UPDATE-P, so do it explicitly here.
+        (bmkp-tags-list)))))
+
+
+;;; Tags-with-defaults reader (mirrors the jump-side pattern) ----------
+
+(defvar bmkp-gt-default-tags--edit-state nil
+  "Current tag list inside `bmkp-gt-default-tags--edit-with-defaults'.
+Bound dynamically by the reader loop; mutated by the action commands
+`bmkp-gt-default-tags--edit-add' / `--edit-pop' / `--edit-clear'.")
+
+(defvar bmkp-gt-default-tags--edit-restart nil
+  "Non-nil signals the tags-with-defaults reader loop to re-enter after
+an action command (M-t / M-D / M-T) quit the minibuffer.  Mirrors
+`bmkp-gt-jump--restart-flag'.")
+
+(defun bmkp-gt-default-tags--edit-add ()
+  "Add a tag to the tags-with-defaults reader.
+Reads via `completing-read' against every tag currently in use.
+`C-g' inside the read cancels the add without terminating the outer
+reader.  Bound to `M-t' in `bmkp-gt-default-tags--edit-map'."
+  (interactive)
+  (condition-case _
+      (let* ((all (mapcar (lambda (x) (if (consp x) (car x) x))
+                          (bmkp-tags-list)))
+             (tag (completing-read "Tag: " all nil nil nil 'bmkp-tag-history)))
+        (when (and tag (not (string-empty-p tag)))
+          (setq bmkp-gt-default-tags--edit-state
+                (append bmkp-gt-default-tags--edit-state (list tag)))))
+    (quit nil))
+  (setq bmkp-gt-default-tags--edit-restart t)
+  (abort-minibuffers))
+
+(defun bmkp-gt-default-tags--edit-pop ()
+  "Pop the last tag from the tags-with-defaults reader.
+Bound to `M-D' in `bmkp-gt-default-tags--edit-map'."
+  (interactive)
+  (when bmkp-gt-default-tags--edit-state
+    (setq bmkp-gt-default-tags--edit-state
+          (butlast bmkp-gt-default-tags--edit-state)))
+  (setq bmkp-gt-default-tags--edit-restart t)
+  (abort-minibuffers))
+
+(defun bmkp-gt-default-tags--edit-clear ()
+  "Clear every tag from the tags-with-defaults reader.
+Bound to `M-T' in `bmkp-gt-default-tags--edit-map'."
+  (interactive)
+  (setq bmkp-gt-default-tags--edit-state nil)
+  (setq bmkp-gt-default-tags--edit-restart t)
+  (abort-minibuffers))
+
+(defvar-keymap bmkp-gt-default-tags--edit-map
+  :doc "Keymap layered onto the current minibuffer's local map inside
+`bmkp-gt-default-tags--edit-with-defaults'.  Composed with the
+`completing-read' map (via `minibuffer-with-setup-hook') so TAB
+completion works as usual.  Same bindings as the jump-side filter
+minibuffer for consistency."
+  "M-t" #'bmkp-gt-default-tags--edit-add
+  "M-D" #'bmkp-gt-default-tags--edit-pop
+  "M-T" #'bmkp-gt-default-tags--edit-clear)
+
+(defun bmkp-gt-default-tags--edit-read-once ()
+  "One pass of the tags-with-defaults reader.
+Displays the current `bmkp-gt-default-tags--edit-state' in the prompt
+and reads via `completing-read' against every tag currently in use,
+with the edit-map keys layered onto the completion keymap so the
+user can complete (TAB) and act (M-t / M-D / M-T) in the same
+minibuffer.  Returns the typed string (which may be empty)."
+  (let* ((state    bmkp-gt-default-tags--edit-state)
+         (state-s  (if state
+                       (propertize
+                        (format "[%s]" (mapconcat #'identity state ", "))
+                        'face 'completions-annotations)
+                     ""))
+         (prompt   (format "Tags %s(RET commit, TAB complete, M-t add, M-D pop, M-T clear): "
+                           (if (string-empty-p state-s)
+                               ""
+                             (concat state-s " "))))
+         (all      (mapcar (lambda (x) (if (consp x) (car x) x))
+                           (bmkp-tags-list))))
+    (minibuffer-with-setup-hook
+        (lambda ()
+          (use-local-map (make-composed-keymap
+                          bmkp-gt-default-tags--edit-map
+                          (current-local-map))))
+      (completing-read prompt all nil nil nil 'bmkp-tag-history))))
+
+(defun bmkp-gt-default-tags--edit-with-defaults (defaults)
+  "Read a tag list, pre-populated with DEFAULTS.
+The prompt shows the current tag set; bindings inside the prompt are:
+
+  M-t    add a tag via `completing-read'.
+  M-D    pop the last tag from the set.
+  M-T    clear the whole set.
+  RET    on empty input: commit and return the current set.
+  RET    on typed input: append the input as a tag and continue.
+  C-g    quit — propagates as usual (aborts the containing command).
+
+Returns the resulting list of tag strings (possibly empty)."
+  (let ((bmkp-gt-default-tags--edit-state defaults)
+        done)
+    (while (not done)
+      (setq bmkp-gt-default-tags--edit-restart nil)
+      (condition-case _
+          (let ((input (bmkp-gt-default-tags--edit-read-once)))
+            (cond
+             (bmkp-gt-default-tags--edit-restart nil) ; loop
+             ((string-empty-p input) (setq done t))    ; commit
+             (t (setq bmkp-gt-default-tags--edit-state
+                      (append bmkp-gt-default-tags--edit-state
+                              (list input))))))
+        (quit
+         ;; An `abort-minibuffers' by an action (M-t/M-D/M-T) sets the
+         ;; restart flag first, so we treat that as a loop.  A user C-g
+         ;; leaves the flag nil, and we propagate the quit as usual —
+         ;; C-g must always abort.
+         (unless bmkp-gt-default-tags--edit-restart
+           (signal 'quit nil)))))
+    bmkp-gt-default-tags--edit-state))
+
+
+;;; Advice — substitute the reader inside `bookmark-set' ---------------
+
+(defun bmkp-gt-default-tags--bookmark-set-around (orig-fn &rest args)
+  "Around advice on `bookmark-set'.
+Establishes the dynamic markers our `bmkp-read-tags-completing' advice
+consults to decide whether to substitute the tags-with-defaults reader
+and whether the after-set hook should skip its auto-append."
+  (let ((bmkp-gt-default-tags--in-bookmark-set t)
+        (bmkp-gt-default-tags--custom-reader-ran nil))
+    (apply orig-fn args)))
+
+(defun bmkp-gt-default-tags--read-tags-around (orig-fn &rest args)
+  "Around advice on `bmkp-read-tags-completing'.
+When called from inside `bookmark-set' with the mode on and defaults
+configured, substitute the tags-with-defaults reader (pre-populated
+with the resolved defaults) and record that fact for the after-set
+hook.  Otherwise pass through to ORIG-FN."
+  (let ((defaults (and bmkp-gt-default-tags--in-bookmark-set
+                       bmkp-gt-default-tags-mode
+                       (bmkp-gt-default-tags--current-create-tags))))
+    (if (null defaults)
+        (apply orig-fn args)
+      (let ((tags (bmkp-gt-default-tags--edit-with-defaults defaults)))
+        (setq bmkp-gt-default-tags--custom-reader-ran t)
+        tags))))
 
 
 ;;; Jump side -----------------------------------------------------------
@@ -342,7 +502,14 @@ When on:
 
   - `bmkp-after-set-hook' gains a handler that appends
     `bmkp-gt-default-tags-on-create' (or the result of calling it,
-    if it is a function) to every just-set bookmark.
+    if it is a function) to every just-set bookmark whose tags prompt
+    was not shown (see below).
+  - `bookmark-set' and `bmkp-read-tags-completing' are advised so
+    that, when `bmkp-prompt-for-tags-flag' is on, the tags prompt
+    fires with the defaults pre-populated.  The reader is
+    interactive: `M-t' adds a tag, `M-D' pops the last, `M-T' clears
+    all — same keys as the jump-side filter minibuffer.  Empty RET
+    commits the current set.
   - `bmkp-gt-jump-default-filters-function' is set so every
     `bmkp-gt-jump' session opens with `bmkp-gt-default-tags-on-jump'
     pre-seeded into `bmkp-gt-jump--active-filters'.  The seeded tags
@@ -355,10 +522,18 @@ on; set at least one to get behavior."
   (cond
    (bmkp-gt-default-tags-mode
     (add-hook 'bmkp-after-set-hook #'bmkp-gt-default-tags--apply-on-create)
+    (advice-add 'bookmark-set :around
+                #'bmkp-gt-default-tags--bookmark-set-around)
+    (advice-add 'bmkp-read-tags-completing :around
+                #'bmkp-gt-default-tags--read-tags-around)
     (setq bmkp-gt-jump-default-filters-function
           #'bmkp-gt-default-tags--seed-jump-filters))
    (t
     (remove-hook 'bmkp-after-set-hook #'bmkp-gt-default-tags--apply-on-create)
+    (advice-remove 'bookmark-set
+                   #'bmkp-gt-default-tags--bookmark-set-around)
+    (advice-remove 'bmkp-read-tags-completing
+                   #'bmkp-gt-default-tags--read-tags-around)
     (when (eq bmkp-gt-jump-default-filters-function
               #'bmkp-gt-default-tags--seed-jump-filters)
       (setq bmkp-gt-jump-default-filters-function nil)))))

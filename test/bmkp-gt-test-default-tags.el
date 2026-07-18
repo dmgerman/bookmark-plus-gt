@@ -418,6 +418,143 @@ must not clobber it."
 
 
 
+;;; Tags-with-defaults reader (create side) -----------------------------
+
+(ert-deftest bmkp-gt-test-default-tags/edit-pop-removes-last ()
+  "The M-D action pops the last tag from the edit state."
+  (let ((bmkp-gt-default-tags--edit-state '("a" "b" "c"))
+        (bmkp-gt-default-tags--edit-restart nil))
+    (cl-letf (((symbol-function 'abort-minibuffers) #'ignore))
+      (bmkp-gt-default-tags--edit-pop))
+    (should (equal '("a" "b") bmkp-gt-default-tags--edit-state))
+    (should bmkp-gt-default-tags--edit-restart)))
+
+(ert-deftest bmkp-gt-test-default-tags/edit-pop-empty-state ()
+  "M-D on an empty state leaves it empty and still sets the restart flag."
+  (let ((bmkp-gt-default-tags--edit-state nil)
+        (bmkp-gt-default-tags--edit-restart nil))
+    (cl-letf (((symbol-function 'abort-minibuffers) #'ignore))
+      (bmkp-gt-default-tags--edit-pop))
+    (should (null bmkp-gt-default-tags--edit-state))
+    (should bmkp-gt-default-tags--edit-restart)))
+
+(ert-deftest bmkp-gt-test-default-tags/edit-clear-empties ()
+  "M-T empties the whole state."
+  (let ((bmkp-gt-default-tags--edit-state '("x" "y"))
+        (bmkp-gt-default-tags--edit-restart nil))
+    (cl-letf (((symbol-function 'abort-minibuffers) #'ignore))
+      (bmkp-gt-default-tags--edit-clear))
+    (should (null bmkp-gt-default-tags--edit-state))
+    (should bmkp-gt-default-tags--edit-restart)))
+
+(ert-deftest bmkp-gt-test-default-tags/edit-add-appends ()
+  "M-t reads a tag via `completing-read' and appends it to the state."
+  (let ((bmkp-gt-default-tags--edit-state '("first"))
+        (bmkp-gt-default-tags--edit-restart nil))
+    (cl-letf (((symbol-function 'abort-minibuffers) #'ignore)
+              ((symbol-function 'completing-read)
+               (lambda (&rest _) "second"))
+              ((symbol-function 'bmkp-tags-list)
+               (lambda (&rest _) '(("first") ("second")))))
+      (bmkp-gt-default-tags--edit-add))
+    (should (equal '("first" "second") bmkp-gt-default-tags--edit-state))
+    (should bmkp-gt-default-tags--edit-restart)))
+
+(ert-deftest bmkp-gt-test-default-tags/edit-with-defaults-c-g-propagates ()
+  "C-g at the outer reader propagates the quit signal — no override."
+  (let ((got-quit nil))
+    (cl-letf (((symbol-function 'bmkp-gt-default-tags--edit-read-once)
+               (lambda () (signal 'quit nil))))
+      (condition-case _
+          (bmkp-gt-default-tags--edit-with-defaults '("d1"))
+        (quit (setq got-quit t))))
+    (should got-quit)))
+
+(ert-deftest bmkp-gt-test-default-tags/edit-with-defaults-empty-ret-commits ()
+  "Empty RET at the outer reader commits the pre-populated state."
+  (cl-letf (((symbol-function 'bmkp-gt-default-tags--edit-read-once)
+             (lambda () "")))
+    (should (equal '("d1")
+                   (bmkp-gt-default-tags--edit-with-defaults '("d1"))))))
+
+(ert-deftest bmkp-gt-test-default-tags/edit-add-empty-input-ignored ()
+  "M-t with empty input from the tag reader leaves state unchanged."
+  (let ((bmkp-gt-default-tags--edit-state '("kept"))
+        (bmkp-gt-default-tags--edit-restart nil))
+    (cl-letf (((symbol-function 'abort-minibuffers) #'ignore)
+              ((symbol-function 'completing-read)
+               (lambda (&rest _) ""))
+              ((symbol-function 'bmkp-tags-list) (lambda (&rest _) nil)))
+      (bmkp-gt-default-tags--edit-add))
+    (should (equal '("kept") bmkp-gt-default-tags--edit-state))))
+
+
+;;; Advice — substitution inside `bookmark-set' ------------------------
+
+(ert-deftest bmkp-gt-test-default-tags/reader-substitutes-inside-bookmark-set ()
+  "When the mode is on and defaults are configured, the advice substitutes
+our tags-with-defaults reader for `bmkp-read-tags-completing' during a
+`bookmark-set' call."
+  (let ((bmkp-gt-default-tags-on-create '("substituted"))
+        (bmkp-prompt-for-tags-flag t)
+        (edit-called nil))
+    (bmkp-gt-test-with-clean-bookmarks
+      (cl-letf (((symbol-function 'bmkp-gt-default-tags--edit-with-defaults)
+                 (lambda (defaults)
+                   (setq edit-called t)
+                   defaults)))
+        (bmkp-gt-test-with-fixture-buffer buf "content"
+          (with-current-buffer buf
+            (bookmark-set "reader-sub" nil t nil))))
+      (should edit-called)
+      ;; Tags were applied inside bookmark-set, not by the after-set hook.
+      (should (member "substituted"
+                      (mapcar (lambda (tg) (if (consp tg) (car tg) tg))
+                              (bookmark-prop-get "reader-sub" 'tags)))))))
+
+(ert-deftest bmkp-gt-test-default-tags/reader-not-substituted-outside-bookmark-set ()
+  "Calling `bmkp-read-tags-completing' outside `bookmark-set' passes through."
+  (let ((bmkp-gt-default-tags-on-create '("would-not-be-substituted"))
+        (edit-called nil)
+        (orig-called nil))
+    (cl-letf (((symbol-function 'bmkp-gt-default-tags--edit-with-defaults)
+               (lambda (_) (setq edit-called t) nil))
+              ((symbol-function 'completing-read)
+               (lambda (&rest _) (setq orig-called t) "")))
+      (bmkp-read-tags-completing))
+    (should orig-called)
+    (should-not edit-called)))
+
+(ert-deftest bmkp-gt-test-default-tags/hook-skips-when-reader-ran ()
+  "When the tags-with-defaults reader ran, the after-set hook skips its
+auto-append (the tags were already applied inside `bookmark-set')."
+  (let ((bmkp-gt-default-tags-on-create '("would-double"))
+        (bmkp-prompt-for-tags-flag t))
+    (bmkp-gt-test-with-clean-bookmarks
+      (cl-letf (((symbol-function 'bmkp-gt-default-tags--edit-with-defaults)
+                 (lambda (defaults) defaults)))
+        (bmkp-gt-test-with-fixture-buffer buf "content"
+          (with-current-buffer buf
+            (bookmark-set "single-apply" nil t nil))))
+      ;; The tag appears exactly once — no double-tagging.
+      (let ((tags (mapcar (lambda (tg) (if (consp tg) (car tg) tg))
+                          (bookmark-prop-get "single-apply" 'tags))))
+        (should (equal 1 (cl-count "would-double" tags :test #'equal)))))))
+
+(ert-deftest bmkp-gt-test-default-tags/hook-runs-when-tags-prompt-off ()
+  "With `bmkp-prompt-for-tags-flag' nil, the reader never fires; the hook
+does its usual auto-append."
+  (let ((bmkp-gt-default-tags-on-create '("hook-path"))
+        (bmkp-prompt-for-tags-flag nil))
+    (bmkp-gt-test-with-clean-bookmarks
+      (bmkp-gt-test-with-fixture-buffer buf "content"
+        (with-current-buffer buf
+          (bookmark-set "no-prompt" nil t nil)))
+      (should (member "hook-path"
+                      (mapcar (lambda (tg) (if (consp tg) (car tg) tg))
+                              (bookmark-prop-get "no-prompt" 'tags)))))))
+
+
 ;;; Filter engine (tag-any facet) -------------------------------------
 ;;
 ;; The engine's `tag-any' facet is what the jump seed maps into.  These
