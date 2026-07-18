@@ -28,15 +28,16 @@ bookmark-plus-gt in order it to properly work.
   :config
   ;; Every feature file is loaded automatically by requiring the
   ;; package.  Enable the ones you want with the corresponding mode:
-  (bmkp-gt-bmenu-tags-mode 1)    ; tags and type columns in *Bookmark List*
-  (bmkp-gt-auto-update-mode 1)   ; reading-position tracker
-  (bmkp-gt-browsel-tabs-mode 1)) ; browser tabs as temporary URL bookmarks
+  (bmkp-gt-bmenu-tags-mode 1)     ; tags and type columns in *Bookmark List*
+  (bmkp-gt-auto-update-mode 1)    ; reading-position tracker
+  (bmkp-gt-browsel-tabs-mode 1)   ; browser tabs as temporary URL bookmarks
+  (bmkp-gt-default-tags-mode 1))  ; default tags on create + jump filter seed
 #+end_src
 
 Each optional feature is a global minor mode that is off by
-default and attaches no side effects until enabled.  Toggle any
-of them at any time; disabling removes the associated advice,
-hooks, and keybindings.
+default and does nothing until enabled.  You can toggle any of
+them at any time; disabling one leaves Emacs as if the feature
+had never been turned on.
 
 Optional features:
 
@@ -63,6 +64,10 @@ Optional features:
     at least one browser).  The =bookmark-plus-gt-browsel-tabs= file
     checks =browsel-version= at load time and signals an error if it
     is older.
+- =bmkp-gt-default-tags-mode= — apply a default tag set to every
+  newly created bookmark, and pre-seed the =bmkp-gt-jump= filter with
+  a (possibly different) tag set at read time.  See "Default tags"
+  below.
 
 Two things are always on when =bookmark-plus-gt= itself is loaded,
 because they are not features you can meaningfully opt out of:
@@ -176,11 +181,36 @@ so bookmark lookup, jump, and annotation display all resolve
 against the real name.  Set the cap to =nil= to disable
 truncation.
 
-Facet keys inside the minibuffer:
+** Facet keys inside the minibuffer
 
-- =M-t= — add a tag filter (completing-read from all tags).
-- =M-D= — pop the last filter.
+- =M-t= — add a narrowing tag filter (=completing-read= from all
+  tags in =bookmark-alist=).
+- =M-D= — pop the last filter entry.
 - =M-T= — clear all filters.
+
+Each =M-t= entry acts as an AND-narrower: successive =M-t work=
+=M-t urgent= shows only bookmarks that have BOTH tags.  Every
+entry in the active-filter set composes as AND.
+
+Two entry kinds appear in the set:
+
+- A single-tag narrowing entry — what =M-t= produces.  Rendered in
+  the prompt as =;tag=.  Multiple such entries AND together.
+- An OR-group entry — what =bmkp-gt-default-tags-on-jump= seeds
+  at session start (see "Default tags" below).  A group holds
+  several tags that are OR'd internally, and may include a nil
+  sentinel that matches untagged bookmarks.  Rendered in the
+  prompt as =;(a|b|—)=, where =—= is the untagged sentinel.  The
+  group as a whole ANDs with the other entries.
+
+Composition example.  Opening =bmkp-gt-jump= with
+=bmkp-gt-default-tags-on-jump= set to =\'("work" "home")= starts
+the session at =[;(work|home)]= — bookmarks tagged =work= OR
+=home=.  Pressing =M-t urgent= then produces =[;(work|home)
+;urgent]= — the same set restricted to bookmarks that are ALSO
+tagged =urgent=.  =M-D= removes =urgent=; another =M-D= removes
+the whole OR-group and you see every bookmark.  =M-T= clears the
+whole set in one keystroke.
 
 ** Type narrowing (single-key filter)
 
@@ -401,6 +431,169 @@ mark-and-execute flow (=d= then =x=).  Errors from the close call
 (tab already gone, browser disconnected) are demoted to a warning
 so the bookmark-side deletion still proceeds.  Non-browsel-tab
 bookmarks are untouched by this advice.
+
+* Default tags
+
+While =bmkp-gt-default-tags-mode= is on, two independent variables
+control the tag(s) applied automatically:
+
+- =bmkp-gt-default-tags-on-create= — tag(s) appended to every new
+  bookmark you set with =C-x r m= or any other interactive frontend.
+  Anything you also type at the tags prompt is kept; duplicates are
+  removed.
+
+- =bmkp-gt-default-tags-on-jump= — tag(s) pre-selected as the filter
+  when you open =bmkp-gt-jump=.  Multiple tags in the list are OR'd
+  together: the session opens showing bookmarks that carry ANY of
+  them.  The seeded filter is visible in the prompt as
+  =;(tag1|tag2|...)= and can be removed with =M-D=, cleared with
+  =M-T= (one-keystroke escape hatch to see every bookmark), or added
+  to (as narrowing AND filters) with =M-t=.
+
+** =bmkp-gt-default-tags-on-create= — simple, no DSL
+
+The create side takes a single flat shape.  A tag is either given
+directly, or as a list of tags:
+
+| Value              | Effect                                                                     |
+|--------------------+----------------------------------------------------------------------------|
+| =nil=              | do nothing                                                                 |
+| ="work"=           | add tag =work=                                                             |
+| ='("work" "home")= | add tags =work= and =home=                                                 |
+| a nullary function | called at set time; must return one of the above.  Errors → warning.       |
+
+Nil elements inside a list are silently dropped.  The alist form
+accepted by the jump side has no meaning here (there is no filter
+engine at set time); setting one triggers a warning and no tag is
+applied.
+
+** =bmkp-gt-default-tags-on-jump= — a small DSL
+
+The jump side is more expressive because it seeds a filter, not a
+tag set.  Shapes:
+
+| Value                                      | Jump-side meaning                                                       |
+|--------------------------------------------+-------------------------------------------------------------------------|
+| =nil=                                      | no filter                                                               |
+| ="work"= (bare string)                     | show bookmarks tagged =work=                                            |
+| ='("work" "home")= (flat list)             | OR: bookmarks tagged =work= or =home=                                   |
+| ='("work" nil)= (flat with sentinel)       | OR: =work= or untagged bookmarks (nil is the *untagged sentinel*)      |
+| ='(nil)=                                   | only untagged bookmarks                                                 |
+| ='((tag . "work") (tag-any . ("a" "b")))= (alist) | seeded verbatim: =work AND (a OR b)=                            |
+| a nullary function                         | called at read time; must return one of the above.  Errors → warning.   |
+
+Rules:
+
+- =nil= inside a flat list is the /untagged sentinel/ — it matches
+  bookmarks with no tags at all.
+- The alist form is a *raw filter set* used as the seed verbatim.
+  Supported facets: =tag= (VALUE is a string; bookmark has that
+  tag) and =tag-any= (VALUE is a list of strings and/or nils,
+  OR'd internally).  Entries in the alist compose as AND.  Use
+  this shape for AND across tags or a mix of AND-of-ORs.
+- The function form lets you compute the value per machine, per
+  project, per time of day, and so on.  It is called at the start
+  of each =bmkp-gt-jump= session.
+- The interactive setter (see below) only produces the flat-list
+  form.  To set the bare-string or alist form, use =setq= /
+  Customize directly.
+
+** Example
+
+Tag every new bookmark with =work=, and by default show only
+=work=-tagged or untagged bookmarks in =bmkp-gt-jump= (i.e., hide
+=personal= or =research= while at work):
+
+#+begin_src emacs-lisp
+(setq bmkp-gt-default-tags-on-create '("work")
+      bmkp-gt-default-tags-on-jump   '("work" nil))
+(bmkp-gt-default-tags-mode 1)
+#+end_src
+
+Function form — flip the create tag between =work= and =personal=
+based on the machine's hostname:
+
+#+begin_src emacs-lisp
+(setq bmkp-gt-default-tags-on-create
+      (lambda ()
+        (list (if (string-match-p "work-laptop" (system-name))
+                  "work"
+                "personal"))))
+(bmkp-gt-default-tags-mode 1)
+#+end_src
+
+** Complex jump seeds: the alist form and dynamic values
+
+Config-time AND — show only bookmarks tagged both =work= and =urgent=:
+
+#+begin_src emacs-lisp
+(setq bmkp-gt-default-tags-on-jump
+      '((tag . "work") (tag . "urgent")))
+(bmkp-gt-default-tags-mode 1)
+#+end_src
+
+Mixed AND-of-ORs — =(work OR home) AND urgent=:
+
+#+begin_src emacs-lisp
+(setq bmkp-gt-default-tags-on-jump
+      '((tag-any . ("work" "home"))
+        (tag . "urgent")))
+#+end_src
+
+Dynamic — narrow to =urgent= only during business hours:
+
+#+begin_src emacs-lisp
+(setq bmkp-gt-default-tags-on-jump
+      (lambda ()
+        (let ((hour (nth 2 (decode-time))))
+          (if (and (>= hour 9) (< hour 17))
+              '((tag . "urgent"))
+            nil))))
+#+end_src
+
+Errors from the function are caught and demoted to a warning; the
+session then starts with an empty filter set.  The seeded entries
+are indistinguishable from user-added filters — they render in the
+prompt, and =M-D= / =M-T= / =M-t= work on them normally.
+
+*** Even lower level: =bmkp-gt-jump-default-filters-function=
+
+The two policies above configure the mode-provided seed function.
+For total control (e.g. mixing with another package that also seeds
+filters), the underlying variable
+=bmkp-gt-jump-default-filters-function= is a nullary function called
+at the start of every =bmkp-gt-jump= session; whatever alist it
+returns becomes the initial value of =bmkp-gt-jump--active-filters=.
+Enabling =bmkp-gt-default-tags-mode= installs its own function into
+that variable — so if you want to override it directly, put your
+=setq= AFTER the mode call, and note that =bmkp-gt-default-tags-on-jump=
+will no longer have any effect on the seed (the create-side policy is
+unaffected).
+
+** Interactive setters
+
+- =M-x bmkp-gt-default-tags-set-on-create= — reads tags one at a
+  time (same interface as Bookmark+'s own tags prompt during
+  =bookmark-set=).  RET on empty input finishes; finishing with no
+  tags clears the default.
+- =M-x bmkp-gt-default-tags-set-on-jump= — same tag reader, plus a
+  follow-up: =Also match untagged bookmarks? (y/n)=.  Answering
+  =y= appends the untagged sentinel to the list.  Answering =y=
+  with no tags entered sets the default to =(nil)= (only
+  untagged).
+
+When the current default is non-nil (there is something to
+protect), the setter asks =y/n= before overwriting.  When the
+current default is nil, the setter applies immediately without
+asking.  Set =bmkp-gt-default-tags-confirm-set= to =nil= to skip
+the confirmation unconditionally.
+
+Both setters require =bmkp-gt-default-tags-mode= to be enabled;
+calling one while the mode is off signals a =user-error= (there
+is nothing to set — the values are inert without the mode).
+
+Both setters change the value in the current session only.  Add a
+=setq= to your init file or use Customize for persistence.
 
 * Annotations
 

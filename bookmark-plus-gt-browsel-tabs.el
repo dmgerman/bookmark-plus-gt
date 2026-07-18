@@ -287,7 +287,16 @@ refresh.  Other bookmarks are untouched."
     (let ((bmkp-gt-browsel-tabs--refreshing t)
           ;; Prevent `bookmark-store's internal `bmkp-maybe-save-bookmarks'
           ;; from writing a not-yet-marked-temporary entry to disk.
-          (bookmark-save-flag nil))
+          (bookmark-save-flag nil)
+          ;; Isolate `bookmark-current-bookmark' so the per-tab
+          ;; `bookmark-store' calls inside this refresh do not leak
+          ;; their name outward.  Without this, a refresh triggered
+          ;; inside `bookmark-set' (via `bmkp-refresh/rebuild-menu-list'
+          ;; on `bookmark-store') overwrites the just-set bookmark's
+          ;; name with the last browsel-tab's URL, so consumers of
+          ;; `bmkp-after-set-hook' that read `bookmark-current-bookmark'
+          ;; see the wrong record.
+          (bookmark-current-bookmark bookmark-current-bookmark))
       (bmkp-gt-browsel-tabs--clear)
       (dolist (tab (bmkp-gt-browsel-tabs--fetch))
         (let ((url (plist-get tab :url)))

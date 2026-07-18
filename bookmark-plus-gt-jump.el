@@ -531,10 +531,16 @@ is first in CANDS leads."
 
 (defvar bmkp-gt-jump--active-filters nil
   "Active filter facets for the current `bmkp-gt-jump' session.
-An alist of (FACET . VALUE).  Currently supported facets:
+An alist of (FACET . VALUE).  Facets compose as AND across the alist.
 
-  `tag'  VALUE is a tag name string; the candidate matches if any of
-         its tags equals VALUE.
+Supported facets:
+
+  `tag'      VALUE is a tag name string.  Candidate matches if it has
+             that tag.
+  `tag-any'  VALUE is a list of tag names, possibly containing nil.
+             Candidate matches if it has ANY of the listed tags
+             (internal OR); a nil element in VALUE matches candidates
+             that have no tags at all.
 
 The list is reset on every fresh invocation of `bmkp-gt-jump' (via
 `bmkp-gt-read-bookmark-for-jump').  Designed to grow new facets
@@ -545,6 +551,24 @@ calling shape.")
   "Non-nil signals the `bmkp-gt-read-bookmark-for-jump' loop to re-enter
 `consult--read' after a filter command quit the minibuffer.")
 
+(defvar bmkp-gt-jump-default-filters-function nil
+  "Nullary function returning the initial value of `bmkp-gt-jump--active-filters'.
+Called at the start of every `bmkp-gt-read-bookmark-for-jump'
+session; the returned alist of `(FACET . VALUE)' entries seeds the
+filter set before the reader enters `consult--read'.  The user
+sees the seeded entries in the prompt (`[;tag ...]') and can
+remove any of them with `M-D', clear the whole set with `M-T', or
+add more with `M-t' — the seed is not distinguishable from
+user-added filters.
+
+Nil (the default) means no seed: every session starts with an
+empty filter set.  Errors from the function are caught and demoted
+to a warning; the session then starts empty.
+
+Feature modules (e.g. `bookmark-plus-gt-default-tags') set this
+variable in their mode's on-branch and restore it in the
+off-branch.")
+
 (defun bmkp-gt--all-tags ()
   "Return the sorted, distinct list of tag names across `bookmark-alist'."
   (let ((seen  (make-hash-table :test 'equal)))
@@ -554,25 +578,61 @@ calling shape.")
     (let (out) (maphash (lambda (k _v) (push k out)) seen)
          (sort out #'string<))))
 
+(defun bmkp-gt--bookmark-has-tag-p (bm tag)
+  "Return non-nil if bookmark record BM carries the tag named TAG."
+  (let ((bmk-tags (bookmark-prop-get (car bm) 'tags)))
+    (cl-some (lambda (tg) (equal (if (consp tg) (car tg) tg) tag))
+             bmk-tags)))
+
 (defun bmkp-gt--bookmark-passes-filters-p (bm filters)
-  "Return non-nil if bookmark record BM satisfies every facet in FILTERS."
-  (cl-every (lambda (f)
-              (pcase (car f)
-                ('tag (let ((tags  (bookmark-prop-get (car bm) 'tags)))
-                        (cl-some (lambda (tg)
-                                   (equal (if (consp tg) (car tg) tg) (cdr f)))
-                                 tags)))
-                (_ t)))
-            filters))
+  "Return non-nil if bookmark record BM satisfies every facet in FILTERS.
+Facets compose as AND across the alist.  Supported facets:
+
+  `tag'       VALUE is a tag name.  BM must have that tag.
+  `tag-any'   VALUE is a list of tag names, possibly including nil.
+              BM matches when it has ANY of the listed tags
+              (internal OR).  A nil element in VALUE matches
+              bookmarks that have no tags at all."
+  (cl-every
+   (lambda (f)
+     (pcase (car f)
+       ('tag     (bmkp-gt--bookmark-has-tag-p bm (cdr f)))
+       ('tag-any (let ((values (cdr f)))
+                   (cl-some (lambda (v)
+                              (if (null v)
+                                  (null (bookmark-prop-get (car bm) 'tags))
+                                (bmkp-gt--bookmark-has-tag-p bm v)))
+                            values)))
+       (_ t)))
+   filters))
+
+(defconst bmkp-gt--untagged-glyph "—"
+  "String rendered for the `untagged' member of a `tag-any' filter (nil).")
 
 (defun bmkp-gt--format-active-filters ()
   "Format `bmkp-gt-jump--active-filters' for display in the prompt.
-Returns a possibly-empty propertized string (no trailing space)."
+Returns a possibly-empty propertized string (no trailing space).
+
+Rendering:
+  `(tag . X)'        → `;X'
+  `(tag-any . VS)'   → `;(V1|V2|...)'; a nil element in VS renders as
+                       `bmkp-gt--untagged-glyph' (the `untagged' mark)."
   (if (null bmkp-gt-jump--active-filters) ""
     (mapconcat (lambda (f)
                  (pcase (car f)
-                   ('tag (propertize (concat ";" (cdr f))
-                                     'face 'completions-annotations))
+                   ('tag
+                    (propertize (concat ";" (cdr f))
+                                'face 'completions-annotations))
+                   ('tag-any
+                    (propertize
+                     (concat ";("
+                             (mapconcat (lambda (v)
+                                          (if (null v)
+                                              bmkp-gt--untagged-glyph
+                                            v))
+                                        (cdr f) "|")
+                             ")")
+                     'face 'completions-annotations))
                    (_    (format "%S" f))))
                (reverse bmkp-gt-jump--active-filters)
                " ")))
@@ -692,7 +752,19 @@ non-nil, read through `consult--read', augmenting each candidate with:
 
 Otherwise falls back to `bookmark-completing-read'."
   (bookmark-maybe-load-default-file)
-  (setq bmkp-gt-jump--active-filters nil)
+  (setq bmkp-gt-jump--active-filters
+        (and bmkp-gt-jump-default-filters-function
+             (condition-case err
+                 (funcall bmkp-gt-jump-default-filters-function)
+               (error
+                (display-warning
+                 'bookmark-plus-gt-jump
+                 (format
+                  "`bmkp-gt-jump-default-filters-function' (%s) signaled: %s.  Starting session with an empty filter set."
+                  bmkp-gt-jump-default-filters-function
+                  (error-message-string err))
+                 :warning)
+                nil))))
   (if (and bmkp-gt-jump-use-consult-flag
            (featurep 'consult)
            (fboundp 'consult--read)

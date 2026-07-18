@@ -31,7 +31,8 @@
 ;;     :config
 ;;     (bmkp-gt-bmenu-tags-mode 1)
 ;;     (bmkp-gt-auto-update-mode 1)
-;;     (bmkp-gt-browsel-tabs-mode 1))
+;;     (bmkp-gt-browsel-tabs-mode 1)
+;;     (bmkp-gt-default-tags-mode 1))
 ;;
 ;; Loading this file requires every feature file (jump, tags,
 ;; auto-update, browsel-tabs); enable the ones you want by turning on
@@ -665,10 +666,12 @@ To make this the default sort in `*Bookmark List*':
 ;;     (bmkp-gt-bmenu-tags-mode 1)
 ;;     (bmkp-gt-auto-update-mode 1)
 ;;     (bmkp-gt-browsel-tabs-mode 1)
+;;     (bmkp-gt-default-tags-mode 1)
 
 (require 'bookmark-plus-gt-jump)
 (require 'bookmark-plus-gt-tags)
 (require 'bookmark-plus-gt-auto-update)
+(require 'bookmark-plus-gt-default-tags)
 
 ;; The browsel-tabs module hard-requires `browsel'.  When browsel is
 ;; not installed, skip the load — the mode simply is not available.
