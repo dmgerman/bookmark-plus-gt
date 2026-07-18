@@ -11,7 +11,7 @@
 ;;
 ;; URL: https://github.com/dmgerman/bookmark-plus-gt
 ;;
-;; Version: 0.2.1
+;; Version: 0.2.2
 ;;
 ;; Keywords:      bookmarks, convenience
 ;; Compatibility: GNU Emacs 30+
@@ -72,7 +72,7 @@ tick.")
   "Non-invasive extensions to Bookmark+."
   :group 'bookmark-plus)
 
-(defconst bmkp-gt-version "0.2.1"
+(defconst bmkp-gt-version "0.2.2"
   "Version of the bookmark-plus-gt package.
 Three-part MAJOR.MINOR.PATCH string.  Kept in sync with the
 `;; Version:' header at the top of this file, which
