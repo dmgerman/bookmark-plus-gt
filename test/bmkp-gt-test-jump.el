@@ -173,6 +173,38 @@ Width is preserved so column alignment does not shift."
         (should (stringp annot))
         (should (string-match-p "/tmp/some/file" annot))))))
 
+(ert-deftest bmkp-gt-test-jump/annotation-distinguishes-duplicate-names ()
+  "Each duplicate-name candidate is annotated from its own full record."
+  (bmkp-gt-test-with-clean-bookmarks
+    (let* ((url-name  (copy-sequence "duplicate"))
+           (file-name (copy-sequence "duplicate"))
+           (url-bmk   (list url-name
+                            (cons 'filename bmkp-non-file-filename)
+                            (cons 'location "https://example.org/duplicate")
+                            (cons 'handler #'bmkp-jump-url-browse)))
+           (file-bmk  (list file-name
+                            (cons 'filename "/tmp/duplicate.org")))
+           (narrow    `((,#'bmkp-jump-url-browse . ?u)
+                        (,#'bookmark-default-handler . ?f))))
+      (put-text-property 0 (length url-name) 'bmkp-full-record url-bmk url-name)
+      (put-text-property 0 (length file-name) 'bmkp-full-record file-bmk file-name)
+      (setq bookmark-alist (list url-bmk file-bmk))
+      ;; Model Marginalia's name-only `assoc' lookup: our annotator must make
+      ;; the identity-selected record first before delegating to it.
+      (cl-letf (((symbol-function 'marginalia-annotate-bookmark)
+                 (lambda (cand)
+                   (let ((bmk (assoc cand bookmark-alist)))
+                     (or (bookmark-prop-get bmk 'location)
+                         (bookmark-prop-get bmk 'filename))))))
+        (let ((url-annot
+               (bmkp-gt-bookmark-annotation
+                (bmkp-gt-jump-candidate-default url-bmk narrow)))
+              (file-annot
+               (bmkp-gt-bookmark-annotation
+                (bmkp-gt-jump-candidate-default file-bmk narrow))))
+          (should (string-match-p "https://example.org/duplicate" url-annot))
+          (should (string-match-p "/tmp/duplicate.org" file-annot)))))))
+
 
 ;;; bmkp-gt-jump-candidate-format-function (consult candidate row)
 
