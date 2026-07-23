@@ -13,6 +13,7 @@
 ;;
 ;; Keywords:      bookmarks, convenience, browser
 ;; Compatibility: GNU Emacs 30+
+;; Package-Requires: ((bookmark+ "0") (browsel "0"))
 ;;
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 ;;
