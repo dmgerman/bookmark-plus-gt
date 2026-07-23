@@ -947,11 +947,16 @@ candidate name's width (marginalia replaces that one char with a
 Either part may be missing.  Returns nil if both are missing."
   (let* ((width      (bmkp-gt--tags-segment-width))
          (name       (bmkp-gt--candidate-name cand))
-         (bmk        (and (stringp name) (assoc name bookmark-alist)))
+         (bmk        (and (stringp name) (bookmark-get-bookmark name 'NOERROR)))
          (tags       (and bmk (bmkp-get-tags bmk)))
          (raw-tags   (if tags (bmkp-gt--tags-segment-raw tags) ""))
+         ;; Marginalia resolves bookmarks with `assoc', which discards the
+         ;; `bmkp-full-record' identity on duplicate names.  Put the resolved
+         ;; record first for this call so its type and target are annotated.
          (base-part  (and (fboundp 'marginalia-annotate-bookmark)
-                          (marginalia-annotate-bookmark name)))
+                          (let ((bookmark-alist
+                                 (cons bmk (remq bmk bookmark-alist))))
+                            (marginalia-annotate-bookmark name))))
          (location   (and bmk
                           (functionp bmkp-gt-bookmark-location-function)
                           (funcall bmkp-gt-bookmark-location-function bmk))))
