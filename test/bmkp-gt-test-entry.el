@@ -135,6 +135,27 @@
                 (bookmark-jump "on-list" #'switch-to-buffer))
               (should-not displayed))))))))
 
+(ert-deftest bmkp-gt-test-jd/function-bookmark-gets-display ()
+  "A function bookmark can rely on the dispatcher to display its buffer.
+`bookmark-bmenu-list' changes the current buffer when called
+noninteractively, but does not display it itself."
+  (bmkp-gt-test-with-clean-bookmarks
+    (unwind-protect
+        (progn
+          (bookmark-store
+           "bookmark-list-function"
+           '((function . bookmark-bmenu-list)
+             (handler . bmkp-jump-function))
+           nil)
+          (with-temp-buffer
+            (let ((displayed nil))
+              (cl-letf (((symbol-function 'switch-to-buffer)
+                         (lambda (buf &rest _) (setq displayed buf))))
+                (bookmark-jump "bookmark-list-function" #'switch-to-buffer))
+              (should (eq displayed (get-buffer bookmark-bmenu-buffer))))))
+      (when (get-buffer bookmark-bmenu-buffer)
+        (kill-buffer bookmark-bmenu-buffer)))))
+
 (ert-deftest bmkp-gt-test-jd/restores-display-function-var ()
   "The advice restores `bmkp-jump-display-function' to its prior value."
   (bmkp-gt-test-with-clean-bookmarks

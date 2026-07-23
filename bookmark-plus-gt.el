@@ -143,11 +143,15 @@ Three-part MAJOR.MINOR.PATCH string.  Kept in sync with the
     bmkp-jump-w3m bmkp-jump-w3m-new-buffer bmkp-jump-w3m-only-one-buffer
     bmkp-jump-url-browse
     bmkp-jump-desktop
-    bmkp-jump-snippet bmkp-jump-sequence bmkp-jump-function
+    bmkp-jump-snippet bmkp-jump-sequence
     bmkp-sound-jump)
   "Handlers that arrange their own display for `bookmark-jump'.
 For any handler not on this list, `bmkp-gt-jump-display--jump-via-advice'
-calls its DISPLAY-FUNCTION after the handler returns.")
+calls its DISPLAY-FUNCTION after the handler returns.
+
+`bmkp-jump-function' is intentionally not listed: a function bookmark
+can change the current buffer without displaying it (for example,
+`bookmark-bmenu-list'), so it follows the ordinary handler contract.")
 
 (defun bmkp-gt-jump-display--jump-via-advice (orig-fn bookmark &optional display-function)
   "Around advice on `bookmark--jump-via'.
