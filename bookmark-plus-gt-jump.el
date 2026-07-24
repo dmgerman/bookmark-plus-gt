@@ -733,7 +733,7 @@ Caller (`bmkp-gt-read-bookmark-for-jump') loops while
                           (funcall preview action name)))))))
 
 ;;;###autoload
-(defun bmkp-gt-read-bookmark-for-jump (prompt &optional default)
+(defun bmkp-gt-read-bookmark-for-jump (prompt &optional default bookmarks-list)
   "Read a bookmark name with live preview, for the `bmkp-gt-jump' commands.
 
 When `consult' is loaded and `bmkp-gt-jump-use-consult-flag' is
@@ -750,10 +750,19 @@ non-nil, read through `consult--read', augmenting each candidate with:
     tag filter, M-D pops, M-T clears).  Active filters are shown in
     the prompt and candidates failing them are excluded.
 
+Non-nil BOOKMARKS-LIST is an alist of bookmarks (same shape as
+`bookmark-alist') used as the candidate pool for this read; when
+nil the pool is `bookmark-alist'.  Callers that supply
+BOOKMARKS-LIST skip `bmkp-gt-jump-default-filters-function' for this
+session — the seeded default-tag filter would compound with an
+externally supplied pool and typically exclude what the caller
+intended to show.
+
 Otherwise falls back to `bookmark-completing-read'."
   (bookmark-maybe-load-default-file)
   (setq bmkp-gt-jump--active-filters
-        (and bmkp-gt-jump-default-filters-function
+        (and (null bookmarks-list)
+             bmkp-gt-jump-default-filters-function
              (condition-case err
                  (funcall bmkp-gt-jump-default-filters-function)
                (error
@@ -765,25 +774,26 @@ Otherwise falls back to `bookmark-completing-read'."
                   (error-message-string err))
                  :warning)
                 nil))))
-  (if (and bmkp-gt-jump-use-consult-flag
-           (featurep 'consult)
-           (fboundp 'consult--read)
-           (fboundp 'consult--bookmark-preview))
-      (let (result done)
-        (while (not done)
-          (setq bmkp-gt-jump--restart-flag nil)
-          (condition-case _
-              (progn
-                (setq result (bmkp-gt--jump-read-once prompt default))
-                (setq done t))
-            (quit
-             ;; A filter command triggered the quit -> loop and re-enter.
-             ;; A genuine C-g -> propagate so the caller aborts cleanly
-             ;; instead of receiving nil and erroring downstream.
-             (unless bmkp-gt-jump--restart-flag
-               (signal 'quit nil)))))
-        result)
-    (bookmark-completing-read prompt default)))
+  (let ((bookmark-alist  (or bookmarks-list bookmark-alist)))
+    (if (and bmkp-gt-jump-use-consult-flag
+             (featurep 'consult)
+             (fboundp 'consult--read)
+             (fboundp 'consult--bookmark-preview))
+        (let (result done)
+          (while (not done)
+            (setq bmkp-gt-jump--restart-flag nil)
+            (condition-case _
+                (progn
+                  (setq result (bmkp-gt--jump-read-once prompt default))
+                  (setq done t))
+              (quit
+               ;; A filter command triggered the quit -> loop and re-enter.
+               ;; A genuine C-g -> propagate so the caller aborts cleanly
+               ;; instead of receiving nil and erroring downstream.
+               (unless bmkp-gt-jump--restart-flag
+                 (signal 'quit nil)))))
+          result)
+      (bookmark-completing-read prompt default))))
 
 
 ;;; Jump commands -------------------------------------------------------
@@ -792,44 +802,82 @@ Otherwise falls back to `bookmark-completing-read'."
 ;; through Bookmark+'s `bmkp-jump-1'.  Users bind them where they want.
 ;; The standard `bookmark-jump' key bindings are left alone.
 
+(defun bmkp-gt--read-jump-target (prompt bookmarks-list bookmarks-filter)
+  "Prompt for a bookmark from a filtered pool, for the `bmkp-gt-jump' commands.
+Compute the candidate pool from BOOKMARKS-LIST (defaults to
+`bookmark-alist') and, when BOOKMARKS-FILTER is non-nil, narrow it
+further by applying that predicate to each bookmark record.  Signal
+an error when the pool is empty.  Otherwise call
+`bmkp-gt-read-bookmark-for-jump' with PROMPT and the pool."
+  (let* ((pool  (or bookmarks-list bookmark-alist))
+         (pool  (if bookmarks-filter
+                    (cl-remove-if-not bookmarks-filter pool)
+                  pool)))
+    (unless pool (error "No bookmarks match the given filter"))
+    (bmkp-gt-read-bookmark-for-jump
+     prompt (bmkp-default-bookmark-name pool) pool)))
+
 ;;;###autoload
-(defun bmkp-gt-jump (bookmark &optional display-function flip-use-region-p)
+(cl-defun bmkp-gt-jump
+    (&optional bookmark jump-display-function flip-use-region-p
+               &key bookmarks-list bookmarks-filter)
   "Jump to BOOKMARK, reading with `bmkp-gt-read-bookmark-for-jump'.
-Same call shape as Bookmark+'s `bookmark-jump'; only the interactive
-read differs (consult live preview when available).
+
+Positional arguments mirror Bookmark+'s `bookmark-jump'; only the
+interactive read differs (consult live preview when available).
 
 In Lisp code:
-BOOKMARK is a bookmark name or a bookmark record.
-Non-nil DISPLAY-FUNCTION is a function to display the bookmark.  By
- default, use `bmkp--pop-to-buffer-same-window'.
-Non-nil FLIP-USE-REGION-P flips the value of `bmkp-use-region'."
-  (interactive (list (bmkp-gt-read-bookmark-for-jump
-                      "Jump to bookmark" (bmkp-default-bookmark-name))
-                     nil
-                     current-prefix-arg))
-  (bmkp-jump-1 bookmark (or display-function #'bmkp--pop-to-buffer-same-window)
-               flip-use-region-p))
+BOOKMARK is a bookmark name or a bookmark record.  When nil, prompt
+ for one.
+Non-nil JUMP-DISPLAY-FUNCTION is passed to `bookmark--jump-via' — a
+ function of one argument (a buffer) that displays it.  Defaults to
+ `bmkp--pop-to-buffer-same-window'.
+Non-nil FLIP-USE-REGION-P flips the value of `bmkp-use-region'.
+
+Keyword arguments narrow the candidate pool for the prompt; they
+are ignored when BOOKMARK is already supplied:
+:BOOKMARKS-LIST is an alist in the same shape as `bookmark-alist'
+ to use as the pool.  Defaults to `bookmark-alist'.
+:BOOKMARKS-FILTER is a predicate of one argument — a bookmark
+ record — that further narrows the pool; a candidate is kept when
+ the predicate returns non-nil.
+
+Signals an error when the pool is empty."
+  (interactive (list nil nil current-prefix-arg))
+  (let ((bookmark  (or bookmark
+                       (bmkp-gt--read-jump-target
+                        "Jump to bookmark"
+                        bookmarks-list bookmarks-filter))))
+    (bmkp-jump-1 bookmark
+                 (or jump-display-function #'bmkp--pop-to-buffer-same-window)
+                 flip-use-region-p)))
 
 ;;;###autoload
-(defun bmkp-gt-jump-other-window (bookmark &optional flip-use-region-p)
+(cl-defun bmkp-gt-jump-other-window
+    (&optional bookmark flip-use-region-p
+               &key bookmarks-list bookmarks-filter)
   "Jump to BOOKMARK in another window, reading with consult live preview.
-See `bmkp-gt-jump'."
-  (interactive (list (bmkp-gt-read-bookmark-for-jump
-                      "Jump to bookmark (in another window)"
-                      (bmkp-default-bookmark-name))
-                     current-prefix-arg))
-  (bmkp-jump-1 bookmark #'bmkp-select-buffer-other-window flip-use-region-p))
+See `bmkp-gt-jump' for the meaning of the arguments."
+  (interactive (list nil current-prefix-arg))
+  (let ((bookmark  (or bookmark
+                       (bmkp-gt--read-jump-target
+                        "Jump to bookmark (in another window)"
+                        bookmarks-list bookmarks-filter))))
+    (bmkp-jump-1 bookmark #'bmkp-select-buffer-other-window flip-use-region-p)))
 
 ;;;###autoload
-(defun bmkp-gt-jump-other-frame (bookmark &optional flip-use-region-p)
+(cl-defun bmkp-gt-jump-other-frame
+    (&optional bookmark flip-use-region-p
+               &key bookmarks-list bookmarks-filter)
   "Jump to BOOKMARK in another frame, reading with consult live preview.
-See `bmkp-gt-jump'."
-  (interactive (list (bmkp-gt-read-bookmark-for-jump
-                      "Jump to bookmark (in another frame)"
-                      (bmkp-default-bookmark-name))
-                     current-prefix-arg))
-  (let ((pop-up-frames  t))
-    (bmkp-gt-jump-other-window bookmark flip-use-region-p)))
+See `bmkp-gt-jump' for the meaning of the arguments."
+  (interactive (list nil current-prefix-arg))
+  (let ((bookmark        (or bookmark
+                             (bmkp-gt--read-jump-target
+                              "Jump to bookmark (in another frame)"
+                              bookmarks-list bookmarks-filter)))
+        (pop-up-frames   t))
+    (bmkp-jump-1 bookmark #'bmkp-select-buffer-other-window flip-use-region-p)))
 
 
 ;;; Bookmark annotation (tags + built-in details) ----------------------

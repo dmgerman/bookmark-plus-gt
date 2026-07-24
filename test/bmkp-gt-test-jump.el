@@ -277,5 +277,109 @@ only correct MRU signal."
       (should (equal '("newer" "older")
                      (mapcar #'substring-no-properties sorted))))))
 
+;;; :bookmarks-list / :bookmarks-filter (restricted-pool jump API)
+
+(ert-deftest bmkp-gt-test-jump/reader-restricts-pool-in-fallback ()
+  "`bmkp-gt-read-bookmark-for-jump' with BOOKMARKS-LIST shadows the pool.
+The fallback `bookmark-completing-read' path sees only the given
+alist as the source, not full `bookmark-alist'."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "in-pool"     buf)
+      (bmkp-gt-test--make-bookmark "not-in-pool" buf))
+    (let ((pool                            (list (assoc "in-pool" bookmark-alist)))
+          (bmkp-gt-jump-use-consult-flag   nil)
+          seen-alist)
+      (cl-letf (((symbol-function 'bookmark-completing-read)
+                 (lambda (&rest _)
+                   (setq seen-alist (copy-sequence bookmark-alist))
+                   "in-pool")))
+        (should (equal "in-pool"
+                       (bmkp-gt-read-bookmark-for-jump "P" nil pool))))
+      (should (equal '("in-pool") (mapcar #'car seen-alist))))))
+
+(ert-deftest bmkp-gt-test-jump/reader-with-pool-skips-default-filter ()
+  "Supplying BOOKMARKS-LIST suppresses `bmkp-gt-jump-default-filters-function'.
+Otherwise the seeded default-tag filter would compound with an
+externally supplied pool and typically hide what the caller
+intended to show."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "one" buf))
+    (let ((bmkp-gt-jump-use-consult-flag         nil)
+          (bmkp-gt-jump-default-filters-function
+           (lambda () '((tag . ("work")))))
+          (bmkp-gt-jump--active-filters          :sentinel))
+      (cl-letf (((symbol-function 'bookmark-completing-read)
+                 (lambda (&rest _) "one")))
+        (bmkp-gt-read-bookmark-for-jump
+         "P" nil (list (assoc "one" bookmark-alist))))
+      (should-not bmkp-gt-jump--active-filters))))
+
+(ert-deftest bmkp-gt-test-jump/reader-without-pool-runs-default-filter ()
+  "Without BOOKMARKS-LIST the seeded `bmkp-gt-jump-default-filters-function' fires
+and its return value populates `bmkp-gt-jump--active-filters'."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "one" buf))
+    (let* ((bmkp-gt-jump-use-consult-flag          nil)
+           (called                                 nil)
+           (bmkp-gt-jump-default-filters-function
+            (lambda () (setq called t) '((tag . ("work")))))
+           (bmkp-gt-jump--active-filters           nil))
+      (cl-letf (((symbol-function 'bookmark-completing-read)
+                 (lambda (&rest _) "one")))
+        (bmkp-gt-read-bookmark-for-jump "P" nil nil))
+      (should called)
+      (should (equal '((tag . ("work"))) bmkp-gt-jump--active-filters)))))
+
+(ert-deftest bmkp-gt-test-jump/read-jump-target-filters-by-record-predicate ()
+  "`bmkp-gt--read-jump-target' narrows the pool with BOOKMARKS-FILTER
+applied to each bookmark's record (not its name)."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "keep-me" buf)
+      (bmkp-gt-test--make-bookmark "drop-me" buf))
+    (bmkp-add-tags "keep-me" '("keep") 'NO-UPDATE-P)
+    (let (seen-pool)
+      (cl-letf (((symbol-function 'bmkp-gt-read-bookmark-for-jump)
+                 (lambda (_prompt _default pool)
+                   (setq seen-pool (mapcar #'car pool))
+                   (caar pool))))
+        (let ((got  (bmkp-gt--read-jump-target
+                     "P" nil
+                     (lambda (rec) (member "keep" (bmkp-get-tags rec))))))
+          (should (equal '("keep-me") seen-pool))
+          (should (equal "keep-me"    got)))))))
+
+(ert-deftest bmkp-gt-test-jump/read-jump-target-empty-pool-signals ()
+  "`bmkp-gt--read-jump-target' with an over-filter signals an error and
+does not call the reader."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "any" buf))
+    (cl-letf (((symbol-function 'bmkp-gt-read-bookmark-for-jump)
+               (lambda (&rest _) (error "reader must not be called"))))
+      (let ((err  (should-error
+                   (bmkp-gt--read-jump-target "P" nil (lambda (_r) nil))
+                   :type 'error)))
+        (should (string-match-p "No bookmarks match" (cadr err)))))))
+
+(ert-deftest bmkp-gt-test-jump/jump-with-bookmark-skips-read ()
+  "`bmkp-gt-jump' called with an explicit BOOKMARK skips the reader.
+The reader stub would signal if invoked; the jump succeeds via a
+stubbed `bmkp-jump-1' and receives the supplied bookmark."
+  (bmkp-gt-test-with-clean-bookmarks
+    (bmkp-gt-test-with-fixture-buffer buf "x"
+      (bmkp-gt-test--make-bookmark "explicit" buf))
+    (let (jumped)
+      (cl-letf (((symbol-function 'bmkp-gt-read-bookmark-for-jump)
+                 (lambda (&rest _) (error "read should not be called")))
+                ((symbol-function 'bmkp-jump-1)
+                 (lambda (bm _df &optional _flip) (setq jumped bm))))
+        (bmkp-gt-jump "explicit"))
+      (should (equal "explicit" jumped)))))
+
+
 (provide 'bmkp-gt-test-jump)
 ;;; bmkp-gt-test-jump.el ends here
